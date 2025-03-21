@@ -88,9 +88,9 @@ def create_class():
             question = request.form.get('question')
             level = request.form.get('level')
             rubric_id = request.form.get('rubric_id')
-            rubric_id = int(rubric_id) if rubric_id else None
+            
             # Validate required fields
-            if not class_name or not assignment_name or not question or not level:
+            if not class_name or not assignment_name or not question or not level or not rubric_id:
                 flash('All fields are required!', category='error')
                 return redirect(url_for('views.create_class'))
 
@@ -121,8 +121,9 @@ def create_class():
             flash('Error creating class: ' + str(e), category='error')
             return redirect(url_for('views.create_class'))
 
-    # If GET request, render the form
-    return render_template('create_class.html', user=current_user, form={})
+    # If GET request, fetch rubrics and render the form
+    rubrics = Rubric.query.all()
+    return render_template('create_class.html', user=current_user, form={}, rubrics=rubrics)
 
 @views.route('/class/<int:class_id>')
 @login_required
@@ -1107,9 +1108,12 @@ def send_grade(submission_id):
 @views.route('/import-google-classroom', endpoint='import_google_classroom')
 @login_required
 def import_google_classroom():
+    # Use the client secret JSON directly from environment variable
+    client_secret_json = json.loads(os.getenv("CLIENT_SECRET_JSON"))
     
-    flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
-        'client_secret.json', scopes=SCOPES)
+    # Create a flow from the client secret json dictionary instead of a file
+    flow = google_auth_oauthlib.flow.Flow.from_client_config(
+        client_secret_json, scopes=SCOPES)
     flow.redirect_uri = url_for('views.oauth2callback', _external=True)
     authorization_url, state = flow.authorization_url(
         access_type='offline',
@@ -1117,6 +1121,7 @@ def import_google_classroom():
         prompt='consent')  
     session['state'] = state
     return redirect(authorization_url)
+
 
 @views.route('/oauth2callback', endpoint='oauth2callback')
 @login_required
@@ -1128,8 +1133,12 @@ def oauth2callback():
             flash('Authentication session expired. Please try again.', 'error')
             return redirect(url_for('views.dashboard'))
         
-        flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
-            'client_secret.json', scopes=SCOPES, state=state)
+        # Use the client secret JSON directly from environment variable
+        client_secret_json = json.loads(os.getenv("CLIENT_SECRET_JSON"))
+        
+        # Create flow from client config instead of file
+        flow = google_auth_oauthlib.flow.Flow.from_client_config(
+            client_secret_json, scopes=SCOPES, state=state)
         flow.redirect_uri = url_for('views.oauth2callback', _external=True)
         
         # Fetch token
@@ -1181,6 +1190,62 @@ def oauth2callback():
         import traceback
         traceback.print_exc()
         return redirect(url_for('views.dashboard'))
+
+
+def get_google_credentials():
+    """
+    Helper function to get refreshed Google credentials
+    """
+    if not current_user.google_tokens:
+        print("No Google tokens found for user")
+        return None
+    
+    try:
+        token_data = json.loads(current_user.google_tokens)
+        
+        # Check if we have all required fields for refreshing
+        required_fields = ['refresh_token', 'token_uri', 'client_id', 'client_secret']
+        missing_fields = [field for field in required_fields if field not in token_data or not token_data[field]]
+        
+        if missing_fields:
+            print(f"Missing required fields for token refresh: {', '.join(missing_fields)}")
+            print(f"Available token data keys: {list(token_data.keys())}")
+            # Re-authentication needed
+            return None
+        
+        credentials = google.oauth2.credentials.Credentials(
+            token=token_data.get('token'),
+            refresh_token=token_data.get('refresh_token'),
+            token_uri=token_data.get('token_uri'),
+            client_id=token_data.get('client_id'),
+            client_secret=token_data.get('client_secret'),
+            scopes=token_data.get('scopes')
+        )
+        
+        # Force refresh if token is expired
+        if not credentials.valid:
+            print("Token expired, attempting to refresh")
+            request = google.auth.transport.requests.Request()
+            credentials.refresh(request)
+            
+            # Update stored token
+            current_user.google_tokens = json.dumps({
+                'token': credentials.token,
+                'refresh_token': credentials.refresh_token,
+                'token_uri': credentials.token_uri,
+                'client_id': credentials.client_id,
+                'client_secret': credentials.client_secret,
+                'scopes': credentials.scopes
+            })
+            db.session.commit()
+            print("Token refreshed successfully")
+        
+        return credentials
+    except Exception as e:
+        print(f"Error refreshing credentials: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def get_google_credentials():
     """
