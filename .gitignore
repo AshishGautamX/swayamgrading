@@ -1,8 +1,5 @@
 .env
 
-client_secret.json
-route/client_secret.json
-CLIENT_SECRET_JSON
 __pycache__/
 *.pyc
 *.pyo
