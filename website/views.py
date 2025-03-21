@@ -12,6 +12,11 @@ import googleapiclient.discovery
 import google.cloud
 from threading import Thread
 
+client_secret_json = json.loads(os.getenv("CLIENT_SECRET_JSON"))
+
+with open("temp_client_secret.json", "w") as temp_file:
+    json.dump(client_secret_json, temp_file)
+
 
 SCOPES = [
     'https://www.googleapis.com/auth/classroom.courses.readonly',
