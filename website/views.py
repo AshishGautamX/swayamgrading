@@ -14,7 +14,7 @@ from threading import Thread
 
 client_secret_json = json.loads(os.getenv("CLIENT_SECRET_JSON"))
 
-with open("temp_client_secret.json", "w") as temp_file:
+with open("client_secret.json", "w") as temp_file:
     json.dump(client_secret_json, temp_file)
 
 
