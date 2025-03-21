@@ -1,7 +1,10 @@
-from . import db
+from .import db
 from flask_login import UserMixin
 import json
 from datetime import datetime
+from functools import wraps
+from flask import flash, redirect, url_for
+from flask_login import current_user
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
@@ -10,7 +13,10 @@ class User(db.Model, UserMixin):
     name = db.Column(db.String(150))
     google_id = db.Column(db.String(150))
     is_teacher = db.Column(db.Boolean, default=False)
-    classes = db.relationship('Class', backref='owner', lazy=True)
+    classes = db.relationship('Class', 
+                          backref='owner', 
+                          lazy=True, 
+                          foreign_keys='Class.owner_id')
     rubrics = db.relationship('Rubric', backref='creator', lazy=True)
     google_tokens = db.Column(db.Text)  # Store Google OAuth tokens
 
@@ -31,8 +37,11 @@ class ManualClass(Class):
 class GoogleClass(Class):
     google_classroom_id = db.Column(db.String(150))
     rubric_id = db.Column(db.Integer, db.ForeignKey('rubric.id', name='fk_googleclass_rubric'))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', name='fk_googleclass_user'))  # Added user_id
     __mapper_args__ = {'polymorphic_identity': 'google'}
     rubric = db.relationship('Rubric', backref='google_classes')
+    user = db.relationship('User', 
+                       backref='google_classes', foreign_keys=[user_id]) 
 
 class Assignment(db.Model):
     __tablename__ = 'assignment'  # Explicitly define the table name
@@ -258,3 +267,92 @@ class GradingJob(db.Model):
         
         if commit:
             db.session.commit()
+
+# Add security utility function
+def check_resource_access(resource, redirect_endpoint='views.dashboard'):
+    """
+    Check if the current user has access to the requested resource.
+    
+    Args:
+        resource: The resource (Class, Rubric, etc.) to check access for
+        redirect_endpoint: The endpoint to redirect to if access is denied
+        
+    Returns:
+        Boolean: True if access is allowed, False if not
+    """
+    # Resource doesn't exist
+    if not resource:
+        return False
+    
+    # Admin always has access
+    if hasattr(current_user, 'is_admin') and current_user.is_admin:
+        return True
+    
+    # Check for various resource types
+    if hasattr(resource, 'owner_id'):
+        return resource.owner_id == current_user.id
+    elif hasattr(resource, 'user_id'):
+        return resource.user_id == current_user.id
+    elif hasattr(resource, 'creator_id'):
+        return resource.creator_id == current_user.id
+    
+    # For resources without direct ownership, check related resources
+    if hasattr(resource, 'class_ref'):
+        return check_resource_access(resource.class_ref)
+    elif hasattr(resource, 'assignment_ref'):
+        return check_resource_access(resource.assignment_ref)
+    
+    # Default to no access if no ownership relation found
+    return False
+
+def access_required(f):
+    """
+    Decorator to check if user has access to a resource.
+    
+    Usage:
+    @views.route('/some-route/<int:resource_id>')
+    @login_required
+    @access_required
+    def some_view(resource_id):
+        # Get resource
+        resource = Resource.query.get_or_404(resource_id)
+        # View logic...
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Extract the resource ID from the URL parameters
+        resource_id = None
+        for param in kwargs:
+            if param.endswith('_id'):
+                resource_id = kwargs[param]
+                resource_type = param.replace('_id', '')
+                break
+        
+        if resource_id is None:
+            flash("Resource not found", "error")
+            return redirect(url_for('views.dashboard'))
+        
+        # Determine the model class based on the parameter name
+        model_map = {
+            'class': Class,
+            'assignment': Assignment,
+            'submission': Submission,
+            'rubric': Rubric,
+            'google_class': GoogleClass
+        }
+        
+        if resource_type not in model_map:
+            flash("Invalid resource type", "error")
+            return redirect(url_for('views.dashboard'))
+        
+        # Get the resource
+        resource = model_map[resource_type].query.get_or_404(resource_id)
+        
+        # Check access
+        if not check_resource_access(resource):
+            flash("You do not have permission to access this resource", "error")
+            return redirect(url_for('views.dashboard'))
+        
+        return f(*args, **kwargs)
+    
+    return decorated_function
