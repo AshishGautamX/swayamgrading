@@ -1,0 +1,696 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Left Panel -->
+    <div class="side-panel">
+        <div class="class-actions">
+            <div class="dropdown">
+                <button class="btn btn-primary dropdown-toggle" 
+                        onclick="toggleDropdown()">
+                    <i class="fas fa-plus"></i> New Class
+                </button>
+                <div class="dropdown-menu" id="classDropdown">
+                    <div class="dropdown-item" 
+                        onclick="window.location.href='{{ url_for('views.import_google_classroom') }}'">
+                        <i class="fab fa-google"></i> Import from Google Classroom
+                    </div>
+                    <div class="dropdown-item"
+                        onclick="window.location.href='{{ url_for('views.create_class') }}'">
+                        <i class="fas fa-file-alt"></i> Create Manually
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Existing Class List -->
+        <div class="class-list">
+            <h3 class="panel-title"><i class="fas fa-chalkboard"></i> My Classes</h3>
+            {% for class in current_user.classes %}
+            <div class="class-card" onclick="window.location.href='{{ url_for('views.view_class', class_id=class.id) }}'">
+                <div class="class-header">
+                    <h3 >{{ class.name }}</h3>
+                    <button class="btn-icon delete-class-btn" onclick="confirmDeleteClass({{ class.id }}, '{{ class.name }}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <p class="meta">{{ class.level|capitalize }} Level</p>
+                
+                {% for assignment in class.assignments %}
+                <div class="assignment-item">
+                    <div class="assignment-header">
+                        <span>{{ assignment.name }}</span>
+                        <button class="btn-icon" 
+                        onclick="window.location.href='{{ url_for('views.grade_assignment', assignment_id=assignment.id) }}'">
+                            <i class="fas fa-clipboard-check"></i>
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="main-panel">
+        <!-- Dashboard Header -->
+        <div class="assignment-header">
+            <h2><i class="fas fa-tachometer-alt"></i> Dashboard</h2>
+        </div>
+
+        <!-- Grading Tools -->
+        <div class="tool-grid">
+            <div class="card tool-card" onclick="openRubricModal()">
+                <i class="fas fa-clipboard-list fa-2x"></i>
+                <h3>Create Rubric</h3>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3>Your Rubrics</h3>
+                    <a href="{{ url_for('views.view_rubrics') }}" class="btn btn-secondary">
+                        View All <i class="fas fa-arrow-right"></i>
+                    </a>
+                </div>
+                <div class="rubrics-preview">
+                    {% for rubric in rubrics %}
+                    <div class="rubric-item">
+                        <h4>{{ rubric.name }}</h4>
+                        <span class="badge">{{ rubric.level }}</span>
+                    </div>
+                    {% else %}
+                    <div class="no-items">
+                        <i class="fas fa-info-circle"></i> No rubrics created yet
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="card tool-card" onclick="showQuickGrade()">
+                <i class="fas fa-bolt fa-2x"></i>
+                <h3>Quick Grade</h3>
+            </div>
+        </div>
+
+        <!-- Quick Grade Form -->
+        <div class="card" id="quick-grade">
+            <div class="card-header">
+                <h3><i class="fas fa-bolt"></i> Quick Grade Assignment</h3>
+            </div>
+            <form id="quick-grade-form">
+                <div class="form-group">
+                    <textarea name="question" placeholder="Assignment Question" required></textarea>
+                </div>
+                <div class="form-group">
+                    <textarea name="student_answer" placeholder="Student Answer" required></textarea>
+                </div>
+                <div class="form-group">
+                    <select name="rubric_id">
+                        <option value="">Select Rubric (optional)</option>
+                        {% for rubric in current_user.rubrics %}
+                        <option value="{{ rubric.id }}">{{ rubric.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-check"></i> Generate Grade
+                </button>
+            </form>
+            <div class="response-container">
+                <h3>Response</h3>
+                <div class="question-container" id="response">
+                    <p>Your grading feedback will appear here.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Class Confirmation Modal -->
+<div id="deleteClassModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Delete Class</h2>
+            <span class="close" onclick="closeDeleteModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p>Are you sure you want to delete <span id="className"></span>?</p>
+            <p class="warning">This action cannot be undone. All assignments and submissions will be permanently deleted.</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+            <form id="deleteClassForm" method="POST">
+                <button type="submit" class="btn btn-danger">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById("quick-grade-form").addEventListener("submit", async function(event) {
+        event.preventDefault();
+        
+        let formData = new FormData(this);
+        let responseElement = document.getElementById("response");
+    
+        let data = {
+            question: formData.get("question"),
+            student_answer: formData.get("student_answer"),
+            rubric_id: formData.get("rubric_id")
+        };
+    
+        responseElement.innerHTML = "<p><i class='fas fa-spinner fa-spin'></i> Grading in progress...</p>";
+    
+        let response = await fetch("/grade", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(data)
+        });
+    
+        let result = await response.json();
+        responseElement.innerHTML = "<p>" + result.feedback + "</p>";
+    });
+
+    function toggleDropdown() {
+        const dropdown = document.getElementById('classDropdown');
+        dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+    }
+
+    // Close dropdown when clicking outside
+    window.onclick = function(event) {
+        if (!event.target.matches('.dropdown-toggle')) {
+            const dropdowns = document.getElementsByClassName("dropdown-menu");
+            for (let i = 0; i < dropdowns.length; i++) {
+                dropdowns[i].style.display = 'none';
+            }
+        }
+        
+        // Close delete modal when clicking outside
+        if (event.target == document.getElementById('deleteClassModal')) {
+            closeDeleteModal();
+        }
+    };
+    
+    // Delete class confirmation
+    function confirmDeleteClass(classId, className) {
+        // Prevent event propagation
+        event.stopPropagation();
+        
+        // Set the class name in the modal
+        document.getElementById('className').textContent = className;
+        
+        // Set the form action
+        document.getElementById('deleteClassForm').action = '/delete-class/' + classId;
+        
+        // Show the modal
+        document.getElementById('deleteClassModal').style.display = 'block';
+    }
+    
+    function closeDeleteModal() {
+        document.getElementById('deleteClassModal').style.display = 'none';
+    }
+    
+    function showQuickGrade() {
+        const quickGradeElement = document.getElementById('quick-grade');
+        quickGradeElement.style.display = quickGradeElement.style.display === 'block' ? 'none' : 'block';
+        quickGradeElement.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    function openRubricModal() {
+        // This function would open a rubric creation modal
+        alert("Rubric creation functionality to be implemented");
+    }
+</script>
+
+<style>
+    /* Dashboard Container Layout */
+    .dashboard-container {
+        display: flex;
+        gap: 1.5rem;
+        min-height: calc(100vh - 60px);
+    }
+    
+    /* Side Panel Styles */
+    .side-panel {
+        width: 300px;
+        background-color: #f5f8fa;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+    
+    /* Panel Title Styles */
+    .panel-title {
+        margin-bottom: 1.5rem;
+        color: var(--tertiary);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* Main Panel Styles */
+    .main-panel {
+        flex: 1;
+        padding: 1.5rem;
+        background-color: #ffffff;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+    
+    /* Tool Grid Layout */
+    .tool-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    /* Card Styles */
+    .card {
+        background-color: #fff;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+        border-left: 4px solid var(--secondary);
+    }
+    
+    .card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+    }
+    
+    /* Tool Card Specific Styles */
+    .tool-card {
+        text-align: center;
+        cursor: pointer;
+        padding: 2rem 1.5rem;
+    }
+    
+    .tool-card i {
+        color: var(--interactive);
+        margin-bottom: 1rem;
+    }
+    
+    .tool-card h3 {
+        color: var(--tertiary);
+        margin: 0;
+    }
+    
+    /* Card Header Styles */
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #eaecef;
+    }
+    
+    .card-header h3 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* Assignment Header Styles */
+    .assignment-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    
+    .assignment-header h2 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--tertiary);
+    }
+    
+    /* Form Styles */
+    .form-group {
+        margin-bottom: 1rem;
+    }
+    
+    textarea, select {
+        width: 100%;
+        padding: 0.75rem;
+        border: 1px solid #dbe1e8;
+        border-radius: 8px;
+        font-size: 1rem;
+        margin-bottom: 1rem;
+        font-family: inherit;
+    }
+    
+    textarea {
+        min-height: 120px;
+    }
+    
+    /* Button Styles */
+    .btn {
+        cursor: pointer;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.2s;
+        border: none;
+    }
+    
+    .btn-primary {
+        background-color: var(--interactive);
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background-color: #48A6A7;
+        transform: translateY(-2px);
+    }
+    
+    .btn-secondary {
+        background-color: #e9ecef;
+        color: #495057;
+    }
+    
+    .btn-secondary:hover {
+        background-color: #dee2e6;
+    }
+    
+    .btn-danger {
+        background-color: #dc3545;
+        color: white;
+    }
+    
+    .btn-danger:hover {
+        background-color: #bd2130;
+    }
+    
+    .btn-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        color: #6c757d;
+        padding: 0.35rem;
+        border-radius: 4px;
+        transition: all 0.2s;
+    }
+    
+    .btn-icon:hover {
+        background-color: #f1f3f5;
+        color: #495057;
+    }
+    
+    /* Class List and Card Styles */
+    .class-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .class-card {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+        overflow: hidden;
+        border-left: 4px solid var(--primary);
+    }
+    
+    .class-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    .class-card.active {
+        border-left: 4px solid var(--interactive);
+        background-color: #e6f7f8;
+    }
+    
+    .class-actions {
+        margin-bottom: 1.5rem;
+    }
+    
+    /* Assignment Item Styles */
+    .assignment-item {
+        background-color: #f8f9fa;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+    }
+    
+    .assignment-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    /* Dropdown Styles */
+    .dropdown {
+        position: relative;
+        display: inline-block;
+    }
+    
+    .dropdown-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        text-align: left;
+    }
+    
+    .dropdown-menu {
+        display: none;
+        position: absolute;
+        background-color: white;
+        min-width: 220px;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        z-index: 1;
+        border-radius: 8px;
+        padding: 0.5rem 0;
+        margin-top: 0.25rem;
+    }
+    
+    .dropdown-item {
+        padding: 0.75rem 1rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .dropdown-item:hover {
+        background-color: #f1f3f5;
+    }
+    
+    /* Meta Styles */
+    .meta {
+        color: #6c757d;
+        font-size: 0.85rem;
+        margin: 0.25rem 0 0.5rem;
+    }
+    
+    /* Rubrics Preview Styles */
+    .rubrics-preview {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .rubric-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem;
+        background-color: #f8f9fa;
+        border-radius: 6px;
+        transition: background-color 0.2s;
+    }
+    
+    .rubric-item:hover {
+        background-color: #e9ecef;
+    }
+    
+    .rubric-item h4 {
+        margin: 0;
+        font-weight: 600;
+    }
+    
+    .badge {
+        background-color: var(--primary);
+        color: #495057;
+        padding: 0.25rem 0.75rem;
+        border-radius: 15px;
+        font-size: 0.75rem;
+    }
+    
+    /* Quick Grade Styles */
+    #quick-grade {
+        display: none;
+        margin-top: 1rem;
+    }
+    
+    .response-container {
+        margin-top: 1.5rem;
+    }
+    
+    /* Question Container Styles */
+    .question-container {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+        border-left: 3px solid var(--secondary);
+    }
+    
+    /* No Items Style */
+    .no-items {
+        text-align: center;
+        padding: 1rem;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        color: #6c757d;
+    }
+    
+    /* Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+    }
+    
+    .modal-content {
+        background-color: #fff;
+        margin: 10% auto;
+        padding: 0;
+        border-radius: 10px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        width: 500px;
+        max-width: 90%;
+        animation: modalFadeIn 0.3s;
+    }
+    
+    @keyframes modalFadeIn {
+        from {opacity: 0; transform: translateY(-30px);}
+        to {opacity: 1; transform: translateY(0);}
+    }
+    
+    .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .modal-header h2 {
+        margin: 0;
+        color: var(--tertiary);
+    }
+    
+    .modal-body {
+        padding: 1.5rem;
+    }
+    
+    .modal-footer {
+        padding: 1rem 1.5rem;
+        border-top: 1px solid #eee;
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+    }
+    
+    .close {
+        color: #aaa;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: color 0.2s;
+    }
+    
+    .close:hover {
+        color: #555;
+    }
+    
+    .warning {
+        color: #dc3545;
+        font-weight: 500;
+        background-color: rgba(220, 53, 69, 0.1);
+        padding: 0.75rem;
+        border-radius: 6px;
+        margin-top: 1rem;
+    }
+    
+    /* Class header with delete button */
+    .class-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .class-header h3 {
+        margin: 0;
+        flex-grow: 1;
+        cursor: pointer;
+        transition: color 0.2s;
+    }
+    
+    .class-header h3:hover {
+        color: var(--interactive);
+    }
+    
+    .delete-class-btn {
+        color: #dc3545;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.35rem;
+        margin-left: 0.5rem;
+        transition: all 0.2s;
+        border-radius: 4px;
+    }
+    
+    .delete-class-btn:hover {
+        color: #bd2130;
+        background-color: rgba(220, 53, 69, 0.1);
+    }
+    
+    /* Responsive Design */
+    @media (max-width: 768px) {
+        .dashboard-container {
+            flex-direction: column;
+        }
+        
+        .side-panel {
+            width: 100%;
+        }
+        
+        .tool-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}

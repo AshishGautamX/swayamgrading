@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="main-panel">
+        <h2>Select Rubric for {{ class_name }}</h2>
+        <form method="POST">
+            <input type="hidden" name="class_name" value="{{ class_name }}">
+            <div class="form-group">
+                <select name="rubric_id" required>
+                    <option value="">Select Rubric</option>
+                    {% for rubric in rubrics %}
+                    <option value="{{ rubric.id }}">{{ rubric.name }} ({{ rubric.level }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <select name="class_level" required>
+                    <option value="Primary">Primary</option>
+                    <option value="Middle School">Middle School</option>
+                    <option value="High School">High School</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Import Class</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

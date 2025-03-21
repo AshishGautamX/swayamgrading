@@ -1,0 +1,68 @@
+<!-- templates/create_assignment.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Left Panel -->
+    <div class="side-panel">
+        <div class="class-list">
+            {% for class in current_user.classes %}
+            <div class="class-card" 
+                 onclick="window.location.href='{{ url_for('views.view_class', class_id=class.id) }}'">
+                <h3>{{ class.name }}</h3>
+                <p class="meta">{{ class.level|capitalize }} Level</p>
+                
+                {% for assignment in class.assignments %}
+                <div class="assignment-item">
+                    <div class="assignment-header">
+                        <span>{{ assignment.name }}</span>
+                        <button class="btn-icon" 
+                        onclick="window.location.href='{{ url_for('views.grade_assignment', assignment_id=assignment.id) }}'">
+                            <i class="fas fa-clipboard-check"></i>
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Right Panel - Creation Form -->
+    <div class="main-panel">
+        <div class="card">
+            <h2>Create Assignment for {{ cls.name }}</h2>
+            <form method="POST">
+                <div class="form-group">
+                    <label>Assignment Name</label>
+                    <input type="text" name="name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Assignment Question</label>
+                    <textarea name="question" rows="5" required></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Standard Answer (Optional)</label>
+                    <textarea name="standard_answer" rows="5"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Rubric (Optional)</label>
+                    <select name="rubric_id">
+                        <option value="">Select Rubric</option>
+                        {% for rubric in current_user.rubrics %}
+                        <option value="{{ rubric.id }}">{{ rubric.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Create Assignment
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

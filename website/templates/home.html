@@ -1,0 +1,108 @@
+<!-- templates/home.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="home-container">
+    <div class="hero-section">
+        <h1>Welcome to Swayam</h1>
+        <p>Your AI-powered grading assistant</p>
+        <div class="cta-buttons">
+            {% if not current_user.is_authenticated %}
+                <a href="{{ url_for('auth.google_login') }}" class="btn btn-primary">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+                <a href="{{ url_for('auth.google_login') }}" class="btn btn-secondary">
+                    <i class="fas fa-user-plus"></i> Sign Up
+                </a>
+            {% else %}
+                <a href="{{ url_for('views.dashboard') }}" class="btn btn-primary">
+                    <i class="fas fa-tachometer-alt"></i> Go to Dashboard
+                </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="features-section">
+        <div class="feature-card">
+            <i class="fas fa-robot fa-3x"></i>
+            <h3>AI-Powered Grading</h3>
+            <p>Leverage advanced AI to grade assignments quickly and accurately.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-clipboard-list fa-3x"></i>
+            <h3>Custom Rubrics</h3>
+            <p>Create and manage your own grading rubrics.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-chalkboard-teacher fa-3x"></i>
+            <h3>Classroom Integration</h3>
+            <p>Seamlessly integrate with Google Classroom.</p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .home-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+
+    .hero-section {
+        text-align: center;
+        padding: 4rem 0;
+    }
+
+    .hero-section h1 {
+        font-size: 3rem;
+        color: var(--tertiary);
+        margin-bottom: 1rem;
+    }
+
+    .hero-section p {
+        font-size: 1.2rem;
+        color: #666;
+        margin-bottom: 2rem;
+    }
+
+    .cta-buttons {
+        display: flex;
+        gap: 1rem;
+        justify-content: center;
+    }
+
+    .features-section {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 2rem;
+        margin-top: 4rem;
+    }
+
+    .feature-card {
+        background: white;
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
+    }
+
+    .feature-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .feature-card i {
+        color: var(--interactive);
+        margin-bottom: 1rem;
+    }
+
+    .feature-card h3 {
+        color: var(--tertiary);
+        margin-bottom: 0.5rem;
+    }
+
+    .feature-card p {
+        color: #666;
+    }
+</style>
+{% endblock %}

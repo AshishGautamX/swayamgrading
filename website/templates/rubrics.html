@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Left Panel -->
+    <div class="side-panel">
+        <div class="class-actions">
+            <button class="btn btn-primary" onclick="openRubricModal()">
+                <i class="fas fa-plus"></i> Add Rubric
+            </button>
+        </div>
+        <!-- Existing navigation items -->
+    </div>
+
+    <!-- Right Panel -->
+    <div class="main-panel">
+        <div class="rubrics-header">
+            <h2>Your Rubrics</h2>
+        </div>
+        
+        <div class="rubrics-list">
+            {% for rubric in rubrics %}
+            <div class="rubric-card">
+                <h3>{{ rubric.name }}</h3>
+                <p class="meta">{{ rubric.level }} Level</p>
+                <p>{{ rubric.description }}</p>
+                <div class="rubric-actions">
+                    <button class="btn-icon" onclick="editRubric({{ rubric.id }})">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn-icon danger" onclick="deleteRubric({{ rubric.id }})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<style>
+    .rubrics-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+
+    .rubric-card {
+        background: var(--primary);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        position: relative;
+    }
+
+    .rubric-actions {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .btn-icon.danger {
+        color: #dc3545;
+    }
+</style>
+{% endblock %}
