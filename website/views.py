@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import tempfile
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, session
 from flask_login import login_required, current_user
-from .models import Assignment, Submission, db, Class, Rubric, RubricCriteria, User, GoogleClass, GradingJob
+from .models import Assignment, Submission, db, Class, Rubric, RubricCriteria, User, GoogleClass, GradingJob, check_resource_access
 import google.generativeai as genai
 import re, json, os
 import urllib.parse
@@ -408,141 +408,161 @@ def deepgrade(submission_id):
     """
     View for grading a specific submission using AI.
     """
-    submission = Submission.query.get_or_404(submission_id)
-    assignment = submission.assignment_ref
-    rubric = assignment.rubric
+    try:
+        # Get the submission
+        submission = Submission.query.get_or_404(submission_id)
+        assignment = submission.assignment_ref
+        class_obj = assignment.class_ref
+        
+        if not check_resource_access(class_obj):
+            flash("You do not have permission to grade this submission", "error")
+            return redirect(url_for('views.dashboard'))
+        
+        rubric = assignment.rubric
 
-    if not rubric:
-        flash('No rubric assigned to this assignment!', 'error')
-        return redirect(url_for('views.view_class', class_id=assignment.class_id))
+        if not rubric:
+            flash('No rubric assigned to this assignment!', 'error')
+            return redirect(url_for('views.view_class', class_id=assignment.class_id))
 
-    # Handle POST request (AJAX call for grading)
-    if request.method == 'POST':
-        try:
-            # Fetch level-specific rubric criteria
-            rubric_criteria = rubric.get_criteria()
-
-            # Construct the grading prompt with rubric criteria
-            prompt = f"""
-            You are an AI teaching assistant. Grade this student answer based on the provided rubric:
-            
-            Question: {assignment.question}
-            Student Answer: {submission.student_answer}
-            
-            Rubric Criteria for {rubric.level} Level:
-            {json.dumps(rubric_criteria, indent=2)}
-            
-            Provide detailed feedback and a numerical grade between 0-100.
-            Format your response as a JSON object with the following keys:
-            - feedback: [detailed feedback]
-            - grade: [numerical grade as a string in format "X/100"]
-            - summary: [brief summary of the feedback]
-            - glow: [what the student did well]
-            - grow: [areas for improvement]
-            - think_about_it: [questions to ponder for improvement]
-            - rubric: [detailed rubric breakdown with scores and explanations]
-            
-            IMPORTANT: Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
-            Your entire response must be a valid JSON object that can be directly parsed.
-            """
-
+        # Handle POST request (AJAX call for grading)
+        if request.method == 'POST':
             try:
-                # Get AI response
-                response = model.generate_content(prompt)
-                print("AI Response:", response.text)  # Log the AI response
+                # Fetch level-specific rubric criteria
+                rubric_criteria = rubric.get_criteria()
 
-                # Process the response to extract clean JSON
-                processed_text = clean_ai_response(response.text)
-                print("Processed Text:", processed_text)  # Debug output
+                # Construct the grading prompt with rubric criteria
+                prompt = f"""
+                You are an AI teaching assistant. Grade this student answer based on the provided rubric:
+                
+                Question: {assignment.question}
+                Student Answer: {submission.student_answer}
+                
+                Rubric Criteria for {rubric.level} Level:
+                {json.dumps(rubric_criteria, indent=2)}
+                
+                Provide detailed feedback and a numerical grade between 0-100.
+                Format your response as a JSON object with the following keys:
+                - feedback: [detailed feedback]
+                - grade: [numerical grade as a string in format "X/100"]
+                - summary: [brief summary of the feedback]
+                - glow: [what the student did well]
+                - grow: [areas for improvement]
+                - think_about_it: [questions to ponder for improvement]
+                - rubric: [detailed rubric breakdown with scores and explanations]
+                
+                IMPORTANT: Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+                Your entire response must be a valid JSON object that can be directly parsed.
+                """
 
                 try:
-                    feedback_data = json.loads(processed_text)
+                    # Get AI response
+                    response = model.generate_content(prompt)
+                    print("AI Response:", response.text)  # Log the AI response
 
-                    # Ensure grade is properly formatted
-                    if isinstance(feedback_data.get('grade'), str):
-                        if '/' not in feedback_data['grade']:
+                    # Process the response to extract clean JSON
+                    processed_text = clean_ai_response(response.text)
+                    print("Processed Text:", processed_text)  # Debug output
+
+                    try:
+                        feedback_data = json.loads(processed_text)
+
+                        # Ensure grade is properly formatted
+                        if isinstance(feedback_data.get('grade'), str):
+                            if '/' not in feedback_data['grade']:
+                                feedback_data['grade'] = f"{feedback_data['grade']}/100"
+                        elif isinstance(feedback_data.get('grade'), (int, float)):
                             feedback_data['grade'] = f"{feedback_data['grade']}/100"
-                    elif isinstance(feedback_data.get('grade'), (int, float)):
-                        feedback_data['grade'] = f"{feedback_data['grade']}/100"
 
-                    # Ensure all expected keys are present
-                    required_keys = ['feedback', 'grade', 'summary', 'glow', 'grow', 'think_about_it', 'rubric']
-                    for key in required_keys:
-                        if key not in feedback_data:
-                            feedback_data[key] = {"rubric": {"Overall": "Assessment included in general feedback."}}[key] if key == 'rubric' else "Not provided in AI response."
+                        # Ensure all expected keys are present
+                        required_keys = ['feedback', 'grade', 'summary', 'glow', 'grow', 'think_about_it', 'rubric']
+                        for key in required_keys:
+                            if key not in feedback_data:
+                                feedback_data[key] = {"rubric": {"Overall": "Assessment included in general feedback."}}[key] if key == 'rubric' else "Not provided in AI response."
 
-                except json.JSONDecodeError as e:
-                    print(f"JSON parse error: {str(e)}")
-                    print(f"Attempted to parse: {processed_text}")
+                    except json.JSONDecodeError as e:
+                        print(f"JSON parse error: {str(e)}")
+                        print(f"Attempted to parse: {processed_text}")
 
-                    feedback_data = {
-                        'feedback': response.text,
-                        'grade': extract_grade(response.text) or "70/100",
-                        'summary': "AI provided feedback but not in the expected format.",
-                        'glow': extract_section(response.text, "glow", "positive points", "strengths"),
-                        'grow': extract_section(response.text, "grow", "improve", "weaknesses"),
-                        'think_about_it': extract_section(response.text, "think", "consider", "reflect"),
-                        'rubric': {"Overall": "See feedback for assessment details."}
+                        feedback_data = {
+                            'feedback': response.text,
+                            'grade': extract_grade(response.text) or "70/100",
+                            'summary': "AI provided feedback but not in the expected format.",
+                            'glow': extract_section(response.text, "glow", "positive points", "strengths"),
+                            'grow': extract_section(response.text, "grow", "improve", "weaknesses"),
+                            'think_about_it': extract_section(response.text, "think", "consider", "reflect"),
+                            'rubric': {"Overall": "See feedback for assessment details."}
+                        }
+
+                    # Save feedback and grade to submission
+                    submission.ai_feedback = json.dumps(feedback_data)
+
+                    # Extract numerical grade
+                    grade_value = 0
+                    try:
+                        if isinstance(feedback_data['grade'], str) and '/' in feedback_data['grade']:
+                            grade_value = float(feedback_data['grade'].split('/')[0])
+                        elif isinstance(feedback_data['grade'], (int, float)):
+                            grade_value = float(feedback_data['grade'])
+                    except (KeyError, ValueError, TypeError):
+                        extracted = extract_grade(response.text)
+                        grade_value = extracted if extracted is not None else 70
+
+                    submission.grade = grade_value
+                    db.session.commit()
+
+                    print("Final feedback data:", json.dumps(feedback_data))  # Debug logging
+                    return jsonify(feedback_data)
+
+                except Exception as e:
+                    print(f"Error processing AI response: {str(e)}")
+                    print(f"Error processing AI response: {str(e)}")
+
+                    fallback_data = {
+                        'feedback': "The AI grading system encountered an error. Please try again or grade manually.",
+                        'grade': "70/100",
+                        'summary': "Automatic grading encountered an error.",
+                        'glow': "Unable to evaluate strengths due to system error.",
+                        'grow': "Unable to evaluate areas for improvement due to system error.",
+                        'think_about_it': "How might the system be improved to better evaluate this response?",
+                        'rubric': {"Overall": "System error prevented detailed evaluation."}
                     }
 
-                # Save feedback and grade to submission
-                submission.ai_feedback = json.dumps(feedback_data)
+                    submission.ai_feedback = json.dumps(fallback_data)
+                    submission.grade = 70
+                    db.session.commit()
 
-                # Extract numerical grade
-                grade_value = 0
-                try:
-                    if isinstance(feedback_data['grade'], str) and '/' in feedback_data['grade']:
-                        grade_value = float(feedback_data['grade'].split('/')[0])
-                    elif isinstance(feedback_data['grade'], (int, float)):
-                        grade_value = float(feedback_data['grade'])
-                except (KeyError, ValueError, TypeError):
-                    extracted = extract_grade(response.text)
-                    grade_value = extracted if extracted is not None else 70
-
-                submission.grade = grade_value
-                db.session.commit()
-
-                print("Final feedback data:", json.dumps(feedback_data))  # Debug logging
-                return jsonify(feedback_data)
+                    return jsonify(fallback_data)
 
             except Exception as e:
-                print(f"Error processing AI response: {str(e)}")
+                print(f"Error in deepgrade route: {str(e)}")
+                print(f"Error in deepgrade POST request: {str(e)}")
+                return jsonify({'error': str(e)}), 500
 
-                fallback_data = {
-                    'feedback': "The AI grading system encountered an error. Please try again or grade manually.",
-                    'grade': "70/100",
-                    'summary': "Automatic grading encountered an error.",
-                    'glow': "Unable to evaluate strengths due to system error.",
-                    'grow': "Unable to evaluate areas for improvement due to system error.",
-                    'think_about_it': "How might the system be improved to better evaluate this response?",
-                    'rubric': {"Overall": "System error prevented detailed evaluation."}
-                }
+        # Handle GET request (render the template)
+        try:
+            ai_feedback = json.loads(submission.ai_feedback) if submission.ai_feedback else None
+        except (json.JSONDecodeError, TypeError) as e:
+            print(f"Invalid JSON in ai_feedback: {str(e)}. Falling back to raw text.")
+            print(f"Invalid JSON in ai_feedback for submission {submission_id}: {str(e)}")
+            ai_feedback = submission.ai_feedback
 
-                submission.ai_feedback = json.dumps(fallback_data)
-                submission.grade = 70
-                db.session.commit()
+        grade = submission.grade if submission.grade is not None else 0
 
-                return jsonify(fallback_data)
+        return render_template('deepgrade.html',
+                            submission=submission,
+                            assignment=assignment,
+                            rubric=rubric,
+                            ai_feedback=ai_feedback,
+                            grade=grade)
+                            
+    except Exception as e:
+        # Global error handling for the entire route
+        print(f"Global error in deepgrade route: {str(e)}")
+        print(f"Global error in deepgrade route for submission {submission_id}: {str(e)}")
+        flash(f"An error occurred while accessing the submission: {str(e)}", "error")
+        # Redirect to a safe page
+        return redirect(url_for('views.dashboard'))
 
-        except Exception as e:
-            print(f"Error in deepgrade route: {str(e)}")
-            return jsonify({'error': str(e)}), 500
-
-    # Handle GET request (render the template)
-    try:
-        ai_feedback = json.loads(submission.ai_feedback) if submission.ai_feedback else None
-    except (json.JSONDecodeError, TypeError) as e:
-        print(f"Invalid JSON in ai_feedback: {str(e)}. Falling back to raw text.")
-        ai_feedback = submission.ai_feedback
-
-    grade = submission.grade if submission.grade is not None else 0
-
-    return render_template('deepgrade.html',
-                           submission=submission,
-                           assignment=assignment,
-                           rubric=rubric,
-                           ai_feedback=ai_feedback,
-                           grade=grade)
 
 def clean_ai_response(text):
     """
