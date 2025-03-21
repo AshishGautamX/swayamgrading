@@ -107,9 +107,9 @@
                                     {% endif %}
                                 </span>
                                 <button class="btn-icon" 
-                                        onclick="window.location.href='{{ url_for('views.deepgrade', submission_id=submission.id) }}'; event.stopPropagation();">
-                                    <i class="fas fa-edit"></i>
-                                </button>
+                                onclick="navigateToDeepgrade('{{ submission.id }}');">
+                            <i class="fas fa-edit"></i>
+                        </button>
                                 <button class="btn-icon btn-danger" 
                                         onclick="confirmDeleteSubmission({{ submission.id }}, event)">
                                     <i class="fas fa-trash"></i>
@@ -879,6 +879,13 @@ function refreshGoogleAssignmentsAndReload(classId) {
         refreshButton.innerHTML = originalHTML;
         refreshButton.disabled = false;
     });
+}
+function navigateToDeepgrade(submissionId) {
+    if (!submissionId) {
+        alert("Error: Submission ID is missing!"); // Debugging message
+        return;
+    }
+    window.location.href = `/grade-submission/${submissionId}`;
 }
 
 // Grade all submissions for an assignment
