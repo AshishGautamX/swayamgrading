@@ -212,15 +212,16 @@ class GradingJob(db.Model):
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    #assignment_ref = db.relationship('Assignment', backref=db.backref('grading_jobs', lazy=True))
     
-    def __init__(self, assignment_id, job_id=None):
+    def __init__(self, assignment_id, job_id=None, status='queued', processed_submissions=0, total_submissions=0):
         """Initialize a new grading job."""
         import uuid
         self.id = job_id or str(uuid.uuid4())
         self.assignment_id = assignment_id
-        self.status = 'queued'
-        self.total_submissions = 0
-        self.processed_submissions = 0
+        self.status = status
+        self.total_submissions = total_submissions
+        self.processed_submissions = processed_submissions
     
     def to_dict(self):
         """Convert job to dictionary for JSON serialization."""
@@ -267,7 +268,6 @@ class GradingJob(db.Model):
         
         if commit:
             db.session.commit()
-
 # Add security utility function
 def check_resource_access(resource, redirect_endpoint='views.dashboard'):
     """

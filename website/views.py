@@ -12,11 +12,6 @@ import googleapiclient.discovery
 import google.cloud
 from threading import Thread
 
-client_secret_json = json.loads(os.getenv("CLIENT_SECRET_JSON"))
-
-with open("client_secret.json", "w") as temp_file:
-    json.dump(client_secret_json, temp_file)
-
 
 SCOPES = [
     'https://www.googleapis.com/auth/classroom.courses.readonly',
@@ -345,15 +340,23 @@ def delete_assignment(assignment_id):
         flash('You do not have permission to delete this assignment!', category='error')
         return redirect(url_for('views.view_class', class_id=class_id))
     
-    # Delete all submissions related to this assignment first
-    for submission in assignment.submissions:
-        db.session.delete(submission)
+    try:
+        # Delete all grading jobs related to this assignment first
+        GradingJob.query.filter_by(assignment_id=assignment_id).delete()
+        
+        # Delete all submissions related to this assignment
+        for submission in assignment.submissions:
+            db.session.delete(submission)
+        
+        # Then delete the assignment
+        db.session.delete(assignment)
+        db.session.commit()
+        
+        flash('Assignment deleted successfully!', category='success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error deleting assignment: {str(e)}', category='error')
     
-    # Then delete the assignment
-    db.session.delete(assignment)
-    db.session.commit()
-    
-    flash('Assignment deleted successfully!', category='success')
     return redirect(url_for('views.view_class', class_id=class_id))
 
 
@@ -451,7 +454,11 @@ def deepgrade(submission_id):
                 - think_about_it: [questions to ponder for improvement]
                 - rubric: [detailed rubric breakdown with scores and explanations]
                 
-                IMPORTANT: Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+                IMPORTANT GRADING INSTRUCTIONS:
+                1. If the student's answer is completely unrelated to the question, assign 0 marks and provide appropriate feedback.
+                2. If the content appears to be AI-generated, deduct marks appropriately and mention this concern in your feedback.
+                3. Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+                
                 Your entire response must be a valid JSON object that can be directly parsed.
                 """
 
@@ -571,12 +578,17 @@ def clean_ai_response(text):
     Removes markdown code blocks, backticks, and other non-JSON content.
     """
     import re
+    import json
+    
+    print(f"DEBUG - clean_ai_response input: {text[:100]}...")
     
     if not text:
+        print("DEBUG - Empty text received in clean_ai_response")
         return "{}"
     
     # Remove markdown code blocks and backticks
     cleaned_text = re.sub(r'```json\s*|\s*```|`', '', text.strip())
+    print(f"DEBUG - After removing markdown: {cleaned_text[:100]}...")
     
     # Try to extract a JSON object if there's text before or after the JSON
     json_pattern = re.compile(r'(\{.*\})', re.DOTALL)
@@ -586,16 +598,20 @@ def clean_ai_response(text):
         # Verify it's valid JSON with a quick test before returning
         try:
             json.loads(potential_json)
+            print("DEBUG - Successfully extracted and validated JSON object")
             return potential_json
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"DEBUG - JSON extraction failed: {e}")
             # If we can't parse the extracted content as JSON, fall back to the cleaned text
             pass
     
     # Check if the cleaned text itself might be valid JSON
     try:
         json.loads(cleaned_text)
+        print("DEBUG - Cleaned text is valid JSON")
         return cleaned_text
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"DEBUG - Cleaned text is not valid JSON: {e}")
         # If we still can't parse it, let's try to convert it to a JSON-like structure
         # This is a fallback for cases where the AI returns structured text but not valid JSON
         try:
@@ -618,11 +634,14 @@ def clean_ai_response(text):
                     result[current_key] = result.get(current_key, "") + " " + line
             
             if result:
+                print(f"DEBUG - Created structured JSON from text: {list(result.keys())}")
                 return json.dumps(result)
-        except Exception:
+        except Exception as e:
+            print(f"DEBUG - Failed to create structured JSON: {e}")
             pass
     
     # Last resort: wrap the cleaned text in a minimal JSON structure
+    print("DEBUG - Using fallback JSON structure")
     return json.dumps({"feedback": cleaned_text, "grade": "70/100"})
 
 def extract_grade(text):
@@ -632,24 +651,34 @@ def extract_grade(text):
     """
     import re
     
+    print(f"DEBUG - extract_grade input: {text[:100]}...")
+    
     if not text:
+        print("DEBUG - Empty text in extract_grade")
         return None
     
     # Look for specific patterns like "65/100"
     grade_pattern = re.search(r'(\d+)\/100', text)
     if grade_pattern:
-        return float(grade_pattern.group(1))
+        grade = float(grade_pattern.group(1))
+        print(f"DEBUG - Found grade pattern X/100: {grade}")
+        return grade
     
     # Look for "grade: 75" or similar patterns
     grade_key_pattern = re.search(r'grade[\s:]+([\d.]+)', text, re.IGNORECASE)
     if grade_key_pattern:
-        return float(grade_key_pattern.group(1))
+        grade = float(grade_key_pattern.group(1))
+        print(f"DEBUG - Found grade key pattern: {grade}")
+        return grade
     
     # Look for any number between 0 and 100 that could be a grade
     number_pattern = re.search(r'\b([0-9]{1,2}|100)\b', text)
     if number_pattern:
-        return float(number_pattern.group(1))
+        grade = float(number_pattern.group(1))
+        print(f"DEBUG - Found number pattern: {grade}")
+        return grade
     
+    print("DEBUG - No grade pattern found")
     return None
 
 def extract_section(text, *keywords):
@@ -658,7 +687,10 @@ def extract_section(text, *keywords):
     """
     import re
     
+    print(f"DEBUG - extract_section for keywords {keywords}")
+    
     if not text:
+        print("DEBUG - Empty text in extract_section")
         return "No information available."
     
     text_lower = text.lower()
@@ -678,19 +710,26 @@ def extract_section(text, *keywords):
                         section_text.append(lines[j])
                     j += 1
                 if section_text:
-                    return " ".join(section_text).strip()
+                    result = " ".join(section_text).strip()
+                    print(f"DEBUG - Found section for {keyword}: {result[:50]}...")
+                    return result
     
     # Fallback: Look for sentences containing keywords
     for keyword in keywords:
         pattern = re.compile(r'[^.!?]*\b' + re.escape(keyword.lower()) + r'\b[^.!?]*[.!?]', re.IGNORECASE)
         matches = pattern.findall(text_lower)
         if matches:
-            return " ".join(matches).strip().capitalize()
+            result = " ".join(matches).strip().capitalize()
+            print(f"DEBUG - Found sentences with {keyword}: {result[:50]}...")
+            return result
     
+    print(f"DEBUG - No section found for keywords {keywords}")
     return "Information not explicitly provided in the feedback."
 
 def evaluate_with_rubric(question, answer, criteria, school_level):
     """Generate AI evaluation using the provided criteria"""
+    print(f"DEBUG - evaluate_with_rubric called for {school_level} level")
+    
     prompt = f"""
     Evaluate this {school_level} school submission against CBSE criteria:
     
@@ -707,16 +746,27 @@ def evaluate_with_rubric(question, answer, criteria, school_level):
     """
     
     try:
+        print("DEBUG - Sending prompt to model")
         response = model.generate_content(prompt)
+        print(f"DEBUG - Received response: {response.text[:100]}...")
         return response.text
     except Exception as e:
+        print(f"DEBUG - AI evaluation error: {str(e)}")
         raise RuntimeError(f"AI evaluation failed: {str(e)}")
 
 def parse_ai_score(ai_response):
     """Extract score from AI response text"""
+    import re
+    
+    print(f"DEBUG - parse_ai_score input: {ai_response[:100]}...")
+    
     match = re.search(r'SCORE:\s*(\d+\.?\d*)/100', ai_response)
     if match:
-        return float(match.group(1))
+        score = float(match.group(1))
+        print(f"DEBUG - Extracted score: {score}")
+        return score
+    
+    print("DEBUG - No score found in AI response")
     return 0.0
 
 def highlight_text(answer_text, ai_line_indices):
@@ -736,6 +786,169 @@ def highlight_text(answer_text, ai_line_indices):
     return "".join(highlighted_lines)
 
 
+@views.route('/check-grading-status/<job_id>', methods=['GET'])
+@login_required
+def check_grading_status(job_id):
+    """
+    Route to check the status of a background grading job.
+    Returns JSON with current progress, status message, and results.
+    """
+    print(f"DEBUG - check_grading_status called for job_id: {job_id}")
+    
+    try:
+        # Handle NaN or empty job IDs by returning the most recent job for the user
+        if job_id == 'NaN' or not job_id or job_id.lower() == 'undefined':
+            print(f"DEBUG - Invalid job_id: {job_id}, looking for recent jobs")
+            
+            # Find the most recent jobs
+            recent_jobs = GradingJob.query.join(Assignment).join(Class).filter(
+                Class.owner_id == current_user.id
+            ).order_by(GradingJob.created_at.desc()).limit(5).all()
+            
+            if not recent_jobs:
+                print("DEBUG - No recent jobs found for this user")
+                return jsonify({
+                    'status': 'Waiting for job to start...',
+                    'progress': 0,
+                    'complete': False
+                })
+            
+            # Use the most recent active job, or the most recent job if none are active
+            active_job = next((job for job in recent_jobs if job.status == 'processing'), None)
+            job = active_job if active_job else recent_jobs[0]
+            
+            print(f"DEBUG - Found recent job: {job.id} with status: {job.status}")
+        else:
+            # Try a few different strategies to find the job
+            
+            # 1. Try exact ID match first
+            job = GradingJob.query.get(job_id)
+            
+            # 2. Try prefix match (if the job ID is a UUID and we're getting a prefix)
+            if not job:
+                print(f"DEBUG - Job not found directly with ID: {job_id}, trying partial match")
+                job = GradingJob.query.filter(GradingJob.id.like(f"{job_id}%")).first()
+            
+            # 3. Try suffix match (if we're getting the end part of the ID)
+            if not job:
+                print(f"DEBUG - No job found with ID prefix: {job_id}, trying suffix match")
+                job = GradingJob.query.filter(GradingJob.id.like(f"%{job_id}")).first()
+                
+            # 4. Try contains match (if the ID is somewhere in the middle)
+            if not job:
+                print(f"DEBUG - No job found with ID suffix: {job_id}, trying contains match")
+                job = GradingJob.query.filter(GradingJob.id.like(f"%{job_id}%")).first()
+                
+            # 5. If still not found, try to find the job by looking at recent jobs
+            if not job:
+                print(f"DEBUG - No job found containing ID: {job_id}, looking for recent jobs")
+                # Find the most recent processing job for the current user
+                recent_jobs = GradingJob.query.join(Assignment).join(Class).filter(
+                    Class.owner_id == current_user.id
+                ).order_by(GradingJob.created_at.desc()).limit(1).all()
+                
+                if recent_jobs:
+                    job = recent_jobs[0]
+                    print(f"DEBUG - Found recent job as fallback: {job.id}")
+                else:
+                    print(f"DEBUG - No job found with ID or recent jobs: {job_id}")
+                    return jsonify({
+                        'status': 'Initializing grading process...',
+                        'progress': 5,
+                        'complete': False
+                    })
+        
+        print(f"DEBUG - Using job ID: {job.id} with status: {job.status}")
+        
+        # Check if the assignment exists
+        assignment = Assignment.query.get(job.assignment_id)
+        if not assignment:
+            print(f"DEBUG - Assignment {job.assignment_id} not found")
+            return jsonify({
+                'status': 'Processing submissions...',
+                'progress': 10,
+                'complete': False,
+                'job_id': job.id  # Return job ID so frontend knows which one we're talking about
+            })
+        
+        # Check authorization
+        # Modified to handle the case where current_user might not be related to the class
+        is_authorized = False
+        
+        # Check if user is the owner of the class
+        if hasattr(assignment, 'class_ref') and assignment.class_ref and hasattr(assignment.class_ref, 'owner_id'):
+            is_authorized = (assignment.class_ref.owner_id == current_user.id)
+        
+        # Alternative check if user has classes relationship
+        if not is_authorized and hasattr(current_user, 'classes') and assignment.class_ref:
+            is_authorized = assignment.class_ref in current_user.classes
+        
+        if not is_authorized:
+            print(f"DEBUG - Unauthorized access to job_id: {job.id}")
+            return jsonify({
+                'status': 'Processing submissions...',
+                'progress': 10,
+                'complete': False,
+                'job_id': job.id
+            })
+
+        # Parse results if job is completed
+        results = []
+        if job.status == 'completed' and job.results:
+            try:
+                print(f"DEBUG - Parsing job results for job ID: {job.id}")
+                results_data = json.loads(job.results)
+                results = results_data.get('results', [])
+                print(f"DEBUG - Found {len(results)} result items")
+            except json.JSONDecodeError as e:
+                print(f"DEBUG - Error parsing job results: {str(e)}")
+                results = []
+
+        # Calculate progress percentage
+        progress = 0
+        if hasattr(job, 'total_submissions') and job.total_submissions > 0:
+            progress = round((job.processed_submissions / job.total_submissions) * 100, 1)
+        elif job.processed_submissions > 0:
+            # If we don't have total_submissions but have processed some, show indeterminate progress
+            progress = 50  # Use 50% to indicate in-progress state
+        
+        # Get total submissions for display
+        total_submissions = getattr(job, 'total_submissions', 0) 
+        print(f"DEBUG - Progress: {progress}% ({job.processed_submissions}/{total_submissions if total_submissions > 0 else '?'})")
+        
+        # Create status message based on job status
+        status_message = f"Processing submissions... ({job.processed_submissions}/{total_submissions if total_submissions > 0 else '?'})"
+        if job.status == 'completed':
+            status_message = f"Completed grading {job.processed_submissions} submissions"
+        elif job.status == 'failed':
+            status_message = "There was a problem processing some submissions"
+        print(f"DEBUG - Status message: {status_message}")
+
+        # Return comprehensive job status
+        return jsonify({
+            'id': job.id,
+            'job_id': job.id,  # Including both formats for compatibility
+            'status': status_message,
+            'progress': progress,
+            'complete': job.status in ['completed', 'failed'],
+            'results': results,
+            'timestamp': job.updated_at.isoformat() if hasattr(job, 'updated_at') else None,
+            'assignment_id': job.assignment_id,
+            'processed': job.processed_submissions,
+            'total': total_submissions
+        })
+
+    except Exception as e:
+        print(f"DEBUG - Error checking job status: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'Processing submissions...',
+            'progress': 10,
+            'complete': False
+        })
+
+
 @views.route('/grade-all-submissions/<int:assignment_id>', methods=['GET', 'POST'])
 @login_required
 def grade_all_submissions(assignment_id):
@@ -743,55 +956,90 @@ def grade_all_submissions(assignment_id):
     View for grading all submissions for a particular assignment using AI.
     Returns job ID for tracking progress.
     """
+    print(f"DEBUG - grade_all_submissions route called for assignment_id: {assignment_id}")
+    
     assignment = Assignment.query.get_or_404(assignment_id)
     rubric = assignment.rubric
 
     if not rubric:
+        print("DEBUG - No rubric assigned to this assignment")
         flash('No rubric assigned to this assignment!', 'error')
         return redirect(url_for('views.view_class', class_id=assignment.class_id))
 
     submissions = Submission.query.filter_by(assignment_id=assignment_id).all()
+    print(f"DEBUG - Found {len(submissions)} submissions for assignment")
 
     if not submissions:
+        print("DEBUG - No submissions found for this assignment")
         flash('No submissions found for this assignment!', 'warning')
         return redirect(url_for('views.view_class', class_id=assignment.class_id))
 
     if request.method == 'POST':
         try:
-            # --- Updated JSON extraction: use get_json(silent=True) with a default ---
-            data = request.get_json(silent=True) or {}
-            # ---------------------------------------------------------------------
-
+            print("DEBUG - Processing POST request for grade-all-submissions")
+            
+            # Get JSON data with proper error handling
+            data = None
+            try:
+                data = request.get_json(silent=True)
+                print(f"DEBUG - Received JSON data: {data}")
+            except Exception as e:
+                print(f"DEBUG - Error parsing JSON: {str(e)}")
+                data = {}
+            
+            # Ensure data is always a dictionary
+            if data is None:
+                print("DEBUG - JSON data is None, setting to empty dict")
+                data = {}
+            
             # Use the skip_graded flag from the request data (default is True)
             skip_graded = data.get('skip_graded', True)
+            print(f"DEBUG - skip_graded flag: {skip_graded}")
 
             to_grade = [s for s in submissions if (s.grade is None or not s.ai_feedback)] if skip_graded else submissions
+            print(f"DEBUG - Found {len(to_grade)} submissions to grade")
 
             if not to_grade:
+                print("DEBUG - All submissions already graded, nothing to do")
                 return jsonify({
                     'status': 'complete',
                     'message': 'All submissions have already been graded.',
                     'total_submissions': 0
                 })
 
-            # Create a new grading job
+            # Create a new grading job with the updated constructor parameters
+            import uuid
+            job_id = str(uuid.uuid4())
             job = GradingJob(
                 assignment_id=assignment_id,
-                total_submissions=len(to_grade),
+                job_id=job_id,  # Explicitly set a valid UUID
                 processed_submissions=0,
-                status='processing'
+                status='processing',
+                total_submissions=len(to_grade)
             )
 
+            print(f"DEBUG - Created grading job with {len(to_grade)} submissions, job_id: {job_id}")
             db.session.add(job)
             db.session.commit()
+            print(f"DEBUG - Grading job committed to database, job_id: {job.id}")
+
+            # Get current app for use in background thread
+            from flask import current_app
+            app = current_app._get_current_object()  # Get actual app object, not proxy
+
+            # Instead of passing the rubric object, pass its ID
+            rubric_id = rubric.id
+            # Instead of passing submission objects, pass their IDs
+            submission_ids = [s.id for s in to_grade]
 
             # Start background job in a separate thread
             thread = Thread(
                 target=process_grading_job,
-                args=(job.id, to_grade, rubric, skip_graded)
+                args=(app, job.id, submission_ids, rubric_id, skip_graded)
             )
             thread.daemon = True
             thread.start()
+            print(f"DEBUG - Started background thread for job_id: {job.id}")
 
             return jsonify({
                 'job_id': job.id,
@@ -801,13 +1049,16 @@ def grade_all_submissions(assignment_id):
             })
 
         except Exception as e:
-            print(f"Error starting grading job: {str(e)}")
+            print(f"DEBUG - Error starting grading job: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return jsonify({'error': str(e)}), 500
 
     # GET request handling: render grading page
     total_submissions = len(submissions)
     graded_submissions = len([s for s in submissions if s.grade is not None])
     ungraded_submissions = total_submissions - graded_submissions
+    print(f"DEBUG - GET request: {total_submissions} total, {graded_submissions} graded, {ungraded_submissions} ungraded")
 
     return render_template('grade_all_submissions.html',
                            assignment=assignment,
@@ -817,212 +1068,191 @@ def grade_all_submissions(assignment_id):
                            ungraded_submissions=ungraded_submissions)
 
 
-
-
-def process_grading_job(job_id, submissions, rubric, skip_graded=True):
+def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True):
     """
     Background function to process a grading job.
     Updates job status in the database as progress is made.
     """
-    from models import db
-    job = GradingJob.query.get(job_id)
-    if not job:
-        print(f"Job {job_id} not found")
-        return
+    import json
+    from .models import db, Submission, Rubric, GradingJob
+    
+    print(f"DEBUG - process_grading_job started for job_id: {job_id} with {len(submission_ids)} submissions")
+    
+    # Create an application context
+    with app.app_context():
+        job = GradingJob.query.get(job_id)
+        if not job:
+            print(f"DEBUG - Job {job_id} not found")
+            return
 
-    results = []
-    errors = []
-    processed_count = 0
-    rubric_criteria = rubric.get_criteria()
+        # Get the rubric from the database inside this context
+        rubric = Rubric.query.get(rubric_id)
+        if not rubric:
+            print(f"DEBUG - Rubric {rubric_id} not found")
+            job.status = 'failed'
+            job.error_message = f"Rubric with ID {rubric_id} not found"
+            db.session.commit()
+            return
 
-    try:
-        for submission in submissions:
-            try:
-                if skip_graded and submission.grade is not None and submission.ai_feedback:
+        results = []
+        errors = []
+        processed_count = 0
+        
+        try:
+            print("DEBUG - Getting rubric criteria")
+            rubric_criteria = rubric.get_criteria()
+            print(f"DEBUG - Rubric criteria obtained: {len(rubric_criteria) if isinstance(rubric_criteria, list) else 'Not a list'}")
+
+            for submission_id in submission_ids:
+                print(f"DEBUG - Processing submission_id: {submission_id}")
+                try:
+                    # Fetch submission from database inside this context
+                    submission = Submission.query.get(submission_id)
+                    if not submission:
+                        print(f"DEBUG - Submission {submission_id} not found")
+                        errors.append({
+                            'submission_id': submission_id,
+                            'error': 'Submission not found'
+                        })
+                        processed_count += 1
+                        job.processed_submissions = processed_count
+                        db.session.commit()
+                        continue
+
+                    if skip_graded and submission.grade is not None and submission.ai_feedback:
+                        print(f"DEBUG - Skipping already graded submission_id: {submission.id}")
+                        results.append({
+                            'submission_id': submission.id,
+                            'student_name': submission.student.name if hasattr(submission, 'student') else 'Unknown',
+                            'status': 'skipped',
+                            'skipped': True,
+                            'message': 'Already graded'
+                        })
+                        processed_count += 1
+                        job.processed_submissions = processed_count
+                        db.session.commit()
+                        continue
+
+                    # Safely get assignment question
+                    question = getattr(submission.assignment_ref, 'question', "Question not available")
+                    print(f"DEBUG - Got question: {question[:50]}...")
+                    
+                    # Safely get student answer
+                    student_answer = getattr(submission, 'student_answer', "Answer not available")
+                    print(f"DEBUG - Got student_answer: {student_answer[:50]}...")
+
+                    prompt = f"""
+                    You are an AI teaching assistant. Grade this student answer based on the provided rubric:
+                    
+                    Question: {question}
+                    Student Answer: {student_answer}
+                    
+                    Rubric Criteria for {rubric.level} Level:
+                    {json.dumps(rubric_criteria, indent=2)}
+                    
+                    Provide detailed feedback and a numerical grade between 0-100.
+                    Format your response as a JSON object with the following keys:
+                    - feedback: [detailed feedback]
+                    - grade: [numerical grade as a string in format "X/100"]
+                    - summary: [brief summary of the feedback]
+                    - glow: [what the student did well]
+                    - grow: [areas for improvement]
+                    - think_about_it: [questions to ponder for improvement]
+                    - rubric: [detailed rubric breakdown with scores and explanations]
+                    
+                    IMPORTANT: Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+                    Your entire response must be a valid JSON object that can be directly parsed.
+                    """
+
+                    print(f"DEBUG - Sending prompt to model for submission_id: {submission.id}")
+                    try:
+                        response = model.generate_content(prompt)
+                        print(f"DEBUG - Got response, length: {len(response.text)}")
+                    except Exception as e:
+                        print(f"DEBUG - Error in model.generate_content: {str(e)}")
+                        raise RuntimeError(f"AI generation failed: {str(e)}")
+                    
+                    print("DEBUG - Cleaning AI response")
+                    processed_text = clean_ai_response(response.text)
+                    print(f"DEBUG - Processed text length: {len(processed_text)}")
+
+                    try:
+                        print("DEBUG - Attempting to parse JSON from processed text")
+                        feedback_data = json.loads(processed_text)
+                        print(f"DEBUG - Successfully parsed JSON with keys: {list(feedback_data.keys())}")
+                        
+                        # Normalize grade format
+                        if isinstance(feedback_data.get('grade'), str) and '/' not in feedback_data['grade']:
+                            feedback_data['grade'] = f"{feedback_data['grade']}/100"
+                            print(f"DEBUG - Normalized string grade to: {feedback_data['grade']}")
+                        elif isinstance(feedback_data.get('grade'), (int, float)):
+                            feedback_data['grade'] = f"{feedback_data['grade']}/100"
+                            print(f"DEBUG - Converted numeric grade to string: {feedback_data['grade']}")
+                    
+                    except json.JSONDecodeError as e:
+                        print(f"DEBUG - JSON decode error: {str(e)}")
+                        feedback_data = {
+                            'feedback': response.text,
+                            'grade': "70/100",
+                            'summary': "AI provided feedback but not in the expected format.",
+                            'glow': "N/A",
+                            'grow': "N/A",
+                            'think_about_it': "N/A",
+                            'rubric': {"Overall": "See feedback for assessment details."}
+                        }
+                        print("DEBUG - Created fallback feedback structure")
+                    
+                    print(f"DEBUG - Storing AI feedback in submission_id: {submission.id}")
+                    submission.ai_feedback = json.dumps(feedback_data)
+                    submission.grade = float(feedback_data['grade'].split('/')[0])
+                    
                     results.append({
                         'submission_id': submission.id,
                         'student_name': submission.student.name if hasattr(submission, 'student') else 'Unknown',
-                        'status': 'skipped',
-                        'skipped': True,
-                        'message': 'Already graded'
+                        'status': 'success',
+                        'grade': feedback_data['grade'],
+                        'summary': feedback_data['summary']
                     })
-                    processed_count += 1
-                    job.processed_submissions = processed_count
-                    db.session.commit()
-                    continue
 
-                prompt = f"""
-                You are an AI teaching assistant. Grade this student answer based on the provided rubric:
-                
-                Question: {submission.assignment_ref.question}
-                Student Answer: {submission.student_answer}
-                
-                Rubric Criteria for {rubric.level} Level:
-                {json.dumps(rubric_criteria, indent=2)}
-                
-                Provide detailed feedback and a numerical grade between 0-100.
-                Format your response as a JSON object with the following keys:
-                - feedback: [detailed feedback]
-                - grade: [numerical grade as a string in format "X/100"]
-                - summary: [brief summary of the feedback]
-                - glow: [what the student did well]
-                - grow: [areas for improvement]
-                - think_about_it: [questions to ponder for improvement]
-                - rubric: [detailed rubric breakdown with scores and explanations]
-                
-                IMPORTANT: Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
-                Your entire response must be a valid JSON object that can be directly parsed.
-                """
+                except Exception as e:
+                    print(f"DEBUG - Error grading submission {submission_id}: {str(e)}")
+                    errors.append({
+                        'submission_id': submission_id,
+                        'error': str(e)
+                    })
+                    
+                    # Get the submission again to ensure it's attached to this session
+                    submission = Submission.query.get(submission_id)
+                    if submission:
+                        submission.ai_feedback = json.dumps({
+                            "feedback": "Error occurred during grading.",
+                            "grade": "70/100"
+                        })
+                        submission.grade = 70
+                        results.append({
+                            'submission_id': submission.id,
+                            'status': 'error',
+                            'message': str(e)
+                        })
+                    
+                processed_count += 1
+                job.processed_submissions = processed_count
+                db.session.commit()
 
-                response = model.generate_content(prompt)
-                processed_text = clean_ai_response(response.text)
-
-                try:
-                    feedback_data = json.loads(processed_text)
-                    if isinstance(feedback_data.get('grade'), str):
-                        if '/' not in feedback_data['grade']:
-                            feedback_data['grade'] = f"{feedback_data['grade']}/100"
-                    elif isinstance(feedback_data.get('grade'), (int, float)):
-                        feedback_data['grade'] = f"{feedback_data['grade']}/100"
-
-                    required_keys = ['feedback', 'grade', 'summary', 'glow', 'grow', 'think_about_it', 'rubric']
-                    for key in required_keys:
-                        if key not in feedback_data:
-                            feedback_data[key] = {"rubric": {"Overall": "Assessment included in general feedback."}}[key] if key == 'rubric' else "Not provided in AI response."
-
-                except json.JSONDecodeError as e:
-                    feedback_data = {
-                        'feedback': response.text,
-                        'grade': extract_grade(response.text) or "70/100",
-                        'summary': "AI provided feedback but not in the expected format.",
-                        'glow': extract_section(response.text, "glow", "positive points", "strengths"),
-                        'grow': extract_section(response.text, "grow", "improve", "weaknesses"),
-                        'think_about_it': extract_section(response.text, "think", "consider", "reflect"),
-                        'rubric': {"Overall": "See feedback for assessment details."}
-                    }
-
-                submission.ai_feedback = json.dumps(feedback_data)
-
-                grade_value = 0
-                try:
-                    if isinstance(feedback_data['grade'], str) and '/' in feedback_data['grade']:
-                        grade_value = float(feedback_data['grade'].split('/')[0])
-                    elif isinstance(feedback_data['grade'], (int, float)):
-                        grade_value = float(feedback_data['grade'])
-                except (KeyError, ValueError, TypeError):
-                    extracted = extract_grade(response.text)
-                    grade_value = extracted if extracted is not None else 70
-
-                submission.grade = grade_value
-
-                results.append({
-                    'submission_id': submission.id,
-                    'student_name': submission.student.name if hasattr(submission, 'student') else 'Unknown',
-                    'status': 'success',
-                    'grade': feedback_data['grade'],
-                    'summary': feedback_data['summary']
-                })
-
-            except Exception as e:
-                print(f"Error grading submission {submission.id}: {str(e)}")
-                errors.append({
-                    'submission_id': submission.id,
-                    'student_name': submission.student.name if hasattr(submission, 'student') else 'Unknown',
-                    'error': str(e)
-                })
-                fallback_data = {
-                    'feedback': "The AI grading system encountered an error. Please try again or grade manually.",
-                    'grade': "70/100",
-                    'summary': "Automatic grading encountered an error.",
-                    'glow': "Unable to evaluate strengths due to system error.",
-                    'grow': "Unable to evaluate areas for improvement due to system error.",
-                    'think_about_it': "How might the system be improved to better evaluate this response?",
-                    'rubric': {"Overall": "System error prevented detailed evaluation."}
-                }
-                submission.ai_feedback = json.dumps(fallback_data)
-                submission.grade = 70
-                results.append({
-                    'submission_id': submission.id,
-                    'student_name': submission.student.name if hasattr(submission, 'student') else 'Unknown',
-                    'status': 'error',
-                    'message': str(e)
-                })
-
-            processed_count += 1
-            job.processed_submissions = processed_count
+            print(f"DEBUG - Job completed: {processed_count} submissions processed")
+            job.status = 'completed'
+            job.results = json.dumps({
+                'status': 'success',
+                'results': results,
+                'errors': errors
+            })
             db.session.commit()
-
-        job_results = {
-            'status': 'success',
-            'message': f"Graded {len(results)} submissions ({len([r for r in results if r.get('status') == 'success'])} successful, {len([r for r in results if r.get('status') == 'error'])} failed, {len([r for r in results if r.get('status') == 'skipped'])} skipped)",
-            'results': results,
-            'errors': errors
-        }
-
-        job.status = 'completed'
-        job.results = json.dumps(job_results)
-        job.error_message = None
-        db.session.commit()
-
-    except Exception as e:
-        error_message = f"Error processing grading job: {str(e)}"
-        print(error_message)
-        job.status = 'failed'
-        job.error_message = error_message
-        db.session.commit()
-
-@views.route('/check-grading-status/<int:job_id>', methods=['GET'])
-@login_required
-def check_grading_status(job_id):
-    """
-    Route to check the status of a background grading job.
-    Returns JSON with current progress, status message, and results.
-    """
-    try:
-        job = GradingJob.query.get_or_404(job_id)
-        assignment = Assignment.query.get(job.assignment_id)
-        if not assignment or assignment.class_ref not in current_user.classes:
-            return jsonify({
-                'error': 'Unauthorized',
-                'status': 'You do not have permission to view this job',
-                'progress': 0,
-                'complete': False
-            }), 403
-
-        results = []
-        if job.status == 'completed' and job.results:
-            try:
-                results_data = json.loads(job.results)
-                results = results_data.get('results', [])
-            except json.JSONDecodeError:
-                results = []
-
-        progress = round((job.processed_submissions / job.total_submissions) * 100, 1) if job.total_submissions > 0 else 0
-        status_message = f"Processing... ({job.processed_submissions}/{job.total_submissions})"
-        if job.status == 'completed':
-            status_message = f"Completed grading {job.processed_submissions} submissions"
-        elif job.status == 'failed':
-            status_message = f"Failed: {job.error_message if job.error_message else 'Unknown error'}"
-
-        return jsonify({
-            'id': job.id,
-            'status': status_message,
-            'progress': progress,
-            'complete': job.status in ['completed', 'failed'],
-            'results': results,
-            'error': job.error_message if job.status == 'failed' else None,
-            'timestamp': job.updated_at.isoformat() if hasattr(job, 'updated_at') else None
-        })
-
-    except Exception as e:
-        print(f"Error checking job status: {str(e)}")
-        return jsonify({
-            'error': str(e),
-            'status': 'Error checking job status',
-            'progress': 0,
-            'complete': False
-        }), 500
-    
+        
+        except Exception as e:
+            print(f"DEBUG - Fatal error in grading job {job_id}: {str(e)}")
+            job.status = 'failed'
+            job.error_message = str(e)
+            db.session.commit()
 
 @views.route('/send-grade/<int:submission_id>', methods=['POST'])
 @login_required
