@@ -769,21 +769,6 @@ def parse_ai_score(ai_response):
     print("DEBUG - No score found in AI response")
     return 0.0
 
-def highlight_text(answer_text, ai_line_indices):
-    """
-    Wraps AI-generated lines in a div with the class 'ai-line' for highlighting.
-    Each line is wrapped in a div to ensure consistent line breaks without <br>.
-    """
-    lines = answer_text.split("\n")
-    highlighted_lines = []
-    
-    for i, line in enumerate(lines, start=1):
-        if i in ai_line_indices:
-            highlighted_lines.append(f'<div class="ai-line">{line}</div>')
-        else:
-            highlighted_lines.append(f'<div>{line}</div>')
-    
-    return "".join(highlighted_lines)
 
 
 @views.route('/check-grading-status/<job_id>', methods=['GET'])
@@ -1160,7 +1145,11 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                     - think_about_it: [questions to ponder for improvement]
                     - rubric: [detailed rubric breakdown with scores and explanations]
                     
-                    IMPORTANT: Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+                    IMPORTANT GRADING INSTRUCTIONS:
+                    1. If the student's answer is completely unrelated to the question, assign 0 marks and provide appropriate feedback.
+                    2. If the content appears to be AI-generated, deduct marks appropriately and mention this concern in your feedback.
+                    3. Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+                    
                     Your entire response must be a valid JSON object that can be directly parsed.
                     """
 
@@ -1181,30 +1170,47 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                         feedback_data = json.loads(processed_text)
                         print(f"DEBUG - Successfully parsed JSON with keys: {list(feedback_data.keys())}")
                         
-                        # Normalize grade format
-                        if isinstance(feedback_data.get('grade'), str) and '/' not in feedback_data['grade']:
-                            feedback_data['grade'] = f"{feedback_data['grade']}/100"
-                            print(f"DEBUG - Normalized string grade to: {feedback_data['grade']}")
+                        # Ensure grade is properly formatted
+                        if isinstance(feedback_data.get('grade'), str):
+                            if '/' not in feedback_data['grade']:
+                                feedback_data['grade'] = f"{feedback_data['grade']}/100"
                         elif isinstance(feedback_data.get('grade'), (int, float)):
                             feedback_data['grade'] = f"{feedback_data['grade']}/100"
-                            print(f"DEBUG - Converted numeric grade to string: {feedback_data['grade']}")
+
+                        # Ensure all expected keys are present
+                        required_keys = ['feedback', 'grade', 'summary', 'glow', 'grow', 'think_about_it', 'rubric']
+                        for key in required_keys:
+                            if key not in feedback_data:
+                                feedback_data[key] = {"rubric": {"Overall": "Assessment included in general feedback."}}[key] if key == 'rubric' else "Not provided in AI response."
                     
                     except json.JSONDecodeError as e:
                         print(f"DEBUG - JSON decode error: {str(e)}")
                         feedback_data = {
                             'feedback': response.text,
-                            'grade': "70/100",
+                            'grade': extract_grade(response.text) or "70/100",
                             'summary': "AI provided feedback but not in the expected format.",
-                            'glow': "N/A",
-                            'grow': "N/A",
-                            'think_about_it': "N/A",
+                            'glow': extract_section(response.text, "glow", "positive points", "strengths"),
+                            'grow': extract_section(response.text, "grow", "improve", "weaknesses"),
+                            'think_about_it': extract_section(response.text, "think", "consider", "reflect"),
                             'rubric': {"Overall": "See feedback for assessment details."}
                         }
                         print("DEBUG - Created fallback feedback structure")
                     
                     print(f"DEBUG - Storing AI feedback in submission_id: {submission.id}")
                     submission.ai_feedback = json.dumps(feedback_data)
-                    submission.grade = float(feedback_data['grade'].split('/')[0])
+                    
+                    # Extract numerical grade
+                    grade_value = 0
+                    try:
+                        if isinstance(feedback_data['grade'], str) and '/' in feedback_data['grade']:
+                            grade_value = float(feedback_data['grade'].split('/')[0])
+                        elif isinstance(feedback_data['grade'], (int, float)):
+                            grade_value = float(feedback_data['grade'])
+                    except (KeyError, ValueError, TypeError):
+                        extracted = extract_grade(response.text)
+                        grade_value = extracted if extracted is not None else 70
+
+                    submission.grade = grade_value
                     
                     results.append({
                         'submission_id': submission.id,
@@ -1224,10 +1230,17 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                     # Get the submission again to ensure it's attached to this session
                     submission = Submission.query.get(submission_id)
                     if submission:
-                        submission.ai_feedback = json.dumps({
-                            "feedback": "Error occurred during grading.",
-                            "grade": "70/100"
-                        })
+                        fallback_data = {
+                            'feedback': "The AI grading system encountered an error. Please try again or grade manually.",
+                            'grade': "70/100",
+                            'summary': "Automatic grading encountered an error.",
+                            'glow': "Unable to evaluate strengths due to system error.",
+                            'grow': "Unable to evaluate areas for improvement due to system error.",
+                            'think_about_it': "How might the system be improved to better evaluate this response?",
+                            'rubric': {"Overall": "System error prevented detailed evaluation."}
+                        }
+                        
+                        submission.ai_feedback = json.dumps(fallback_data)
                         submission.grade = 70
                         results.append({
                             'submission_id': submission.id,
