@@ -1058,9 +1058,6 @@ function pollGradingStatus(jobId, assignmentId, progressBar, progressText, resul
                         let statusClass = 'result-success';
                         let statusText = '';
                         
-                        // Use student name instead of "Unknown"
-                        const studentName = result.student_name || 'Student';
-                        
                         if (result.error) {
                             statusClass = 'result-error';
                             statusText = 'Error processing';
@@ -1072,14 +1069,13 @@ function pollGradingStatus(jobId, assignmentId, progressBar, progressText, resul
                         }
                         
                         resultItem.innerHTML = `
-                            <span class="student-name">${studentName}</span>
                             <span class="${statusClass}">${statusText}</span>
                         `;
                         resultsDiv.appendChild(resultItem);
                     });
                 } else {
                     resultsContainer.style.display = 'block';
-                    resultsDiv.innerHTML = '<div class="result-item"><span class="student-name">All Students</span><span class="result-success">Grading completed</span></div>';
+                    resultsDiv.innerHTML = '<div class="result-item"><span class="result-success">Grading completed</span></div>';
                 }
                 
                 // Update progress text for completion

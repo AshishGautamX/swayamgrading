@@ -386,24 +386,6 @@ def view_rubrics():
     rubrics = Rubric.query.filter_by(creator_id=current_user.id).all()
     return render_template('rubrics.html', rubrics=rubrics)
 
-
-def detect_ai_content(text):
-    """Detect AI-generated content with line numbers using Gemini"""
-    prompt = f"""
-    Analyze this text and identify EXACTLY which line numbers (1-based) are likely AI-generated.
-    Return ONLY comma-separated numbers. Example: '1,3,5'
-    
-    Text:
-    {text}
-    """
-    try:
-        response = model.generate_content(prompt)
-        # Extract numbers using regex to handle various formats
-        numbers = re.findall(r'\d+', response.text)
-        return [int(n) for n in numbers if n.isdigit()]
-    except Exception as e:
-        print(f"AI Detection Error: {str(e)}")
-        return []
     
 
 @views.route('/grade-submission/<int:submission_id>', methods=['GET', 'POST'])
@@ -941,51 +923,38 @@ def grade_all_submissions(assignment_id):
     View for grading all submissions for a particular assignment using AI.
     Returns job ID for tracking progress.
     """
-    print(f"DEBUG - grade_all_submissions route called for assignment_id: {assignment_id}")
-    
     assignment = Assignment.query.get_or_404(assignment_id)
     rubric = assignment.rubric
 
     if not rubric:
-        print("DEBUG - No rubric assigned to this assignment")
         flash('No rubric assigned to this assignment!', 'error')
         return redirect(url_for('views.view_class', class_id=assignment.class_id))
 
     submissions = Submission.query.filter_by(assignment_id=assignment_id).all()
-    print(f"DEBUG - Found {len(submissions)} submissions for assignment")
 
     if not submissions:
-        print("DEBUG - No submissions found for this assignment")
         flash('No submissions found for this assignment!', 'warning')
         return redirect(url_for('views.view_class', class_id=assignment.class_id))
 
     if request.method == 'POST':
         try:
-            print("DEBUG - Processing POST request for grade-all-submissions")
-            
             # Get JSON data with proper error handling
             data = None
             try:
                 data = request.get_json(silent=True)
-                print(f"DEBUG - Received JSON data: {data}")
-            except Exception as e:
-                print(f"DEBUG - Error parsing JSON: {str(e)}")
+            except Exception:
                 data = {}
             
             # Ensure data is always a dictionary
             if data is None:
-                print("DEBUG - JSON data is None, setting to empty dict")
                 data = {}
             
             # Use the skip_graded flag from the request data (default is True)
             skip_graded = data.get('skip_graded', True)
-            print(f"DEBUG - skip_graded flag: {skip_graded}")
 
             to_grade = [s for s in submissions if (s.grade is None or not s.ai_feedback)] if skip_graded else submissions
-            print(f"DEBUG - Found {len(to_grade)} submissions to grade")
 
             if not to_grade:
-                print("DEBUG - All submissions already graded, nothing to do")
                 return jsonify({
                     'status': 'complete',
                     'message': 'All submissions have already been graded.',
@@ -1003,10 +972,8 @@ def grade_all_submissions(assignment_id):
                 total_submissions=len(to_grade)
             )
 
-            print(f"DEBUG - Created grading job with {len(to_grade)} submissions, job_id: {job_id}")
             db.session.add(job)
             db.session.commit()
-            print(f"DEBUG - Grading job committed to database, job_id: {job.id}")
 
             # Get current app for use in background thread
             from flask import current_app
@@ -1024,7 +991,6 @@ def grade_all_submissions(assignment_id):
             )
             thread.daemon = True
             thread.start()
-            print(f"DEBUG - Started background thread for job_id: {job.id}")
 
             return jsonify({
                 'job_id': job.id,
@@ -1034,7 +1000,6 @@ def grade_all_submissions(assignment_id):
             })
 
         except Exception as e:
-            print(f"DEBUG - Error starting grading job: {str(e)}")
             import traceback
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500
@@ -1043,7 +1008,6 @@ def grade_all_submissions(assignment_id):
     total_submissions = len(submissions)
     graded_submissions = len([s for s in submissions if s.grade is not None])
     ungraded_submissions = total_submissions - graded_submissions
-    print(f"DEBUG - GET request: {total_submissions} total, {graded_submissions} graded, {ungraded_submissions} ungraded")
 
     return render_template('grade_all_submissions.html',
                            assignment=assignment,
@@ -1061,19 +1025,15 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
     import json
     from .models import db, Submission, Rubric, GradingJob
     
-    print(f"DEBUG - process_grading_job started for job_id: {job_id} with {len(submission_ids)} submissions")
-    
     # Create an application context
     with app.app_context():
         job = GradingJob.query.get(job_id)
         if not job:
-            print(f"DEBUG - Job {job_id} not found")
             return
 
         # Get the rubric from the database inside this context
         rubric = Rubric.query.get(rubric_id)
         if not rubric:
-            print(f"DEBUG - Rubric {rubric_id} not found")
             job.status = 'failed'
             job.error_message = f"Rubric with ID {rubric_id} not found"
             db.session.commit()
@@ -1084,17 +1044,13 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
         processed_count = 0
         
         try:
-            print("DEBUG - Getting rubric criteria")
             rubric_criteria = rubric.get_criteria()
-            print(f"DEBUG - Rubric criteria obtained: {len(rubric_criteria) if isinstance(rubric_criteria, list) else 'Not a list'}")
 
             for submission_id in submission_ids:
-                print(f"DEBUG - Processing submission_id: {submission_id}")
                 try:
                     # Fetch submission from database inside this context
                     submission = Submission.query.get(submission_id)
                     if not submission:
-                        print(f"DEBUG - Submission {submission_id} not found")
                         errors.append({
                             'submission_id': submission_id,
                             'error': 'Submission not found'
@@ -1105,7 +1061,6 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                         continue
 
                     if skip_graded and submission.grade is not None and submission.ai_feedback:
-                        print(f"DEBUG - Skipping already graded submission_id: {submission.id}")
                         results.append({
                             'submission_id': submission.id,
                             'student_name': submission.student.name if hasattr(submission, 'student') else 'Unknown',
@@ -1120,11 +1075,9 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
 
                     # Safely get assignment question
                     question = getattr(submission.assignment_ref, 'question', "Question not available")
-                    print(f"DEBUG - Got question: {question[:50]}...")
                     
                     # Safely get student answer
                     student_answer = getattr(submission, 'student_answer', "Answer not available")
-                    print(f"DEBUG - Got student_answer: {student_answer[:50]}...")
 
                     prompt = f"""
                     You are an AI teaching assistant. Grade this student answer based on the provided rubric:
@@ -1153,22 +1106,15 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                     Your entire response must be a valid JSON object that can be directly parsed.
                     """
 
-                    print(f"DEBUG - Sending prompt to model for submission_id: {submission.id}")
                     try:
                         response = model.generate_content(prompt)
-                        print(f"DEBUG - Got response, length: {len(response.text)}")
                     except Exception as e:
-                        print(f"DEBUG - Error in model.generate_content: {str(e)}")
                         raise RuntimeError(f"AI generation failed: {str(e)}")
                     
-                    print("DEBUG - Cleaning AI response")
                     processed_text = clean_ai_response(response.text)
-                    print(f"DEBUG - Processed text length: {len(processed_text)}")
 
                     try:
-                        print("DEBUG - Attempting to parse JSON from processed text")
                         feedback_data = json.loads(processed_text)
-                        print(f"DEBUG - Successfully parsed JSON with keys: {list(feedback_data.keys())}")
                         
                         # Ensure grade is properly formatted
                         if isinstance(feedback_data.get('grade'), str):
@@ -1183,8 +1129,7 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                             if key not in feedback_data:
                                 feedback_data[key] = {"rubric": {"Overall": "Assessment included in general feedback."}}[key] if key == 'rubric' else "Not provided in AI response."
                     
-                    except json.JSONDecodeError as e:
-                        print(f"DEBUG - JSON decode error: {str(e)}")
+                    except json.JSONDecodeError:
                         feedback_data = {
                             'feedback': response.text,
                             'grade': extract_grade(response.text) or "70/100",
@@ -1194,9 +1139,7 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                             'think_about_it': extract_section(response.text, "think", "consider", "reflect"),
                             'rubric': {"Overall": "See feedback for assessment details."}
                         }
-                        print("DEBUG - Created fallback feedback structure")
                     
-                    print(f"DEBUG - Storing AI feedback in submission_id: {submission.id}")
                     submission.ai_feedback = json.dumps(feedback_data)
                     
                     # Extract numerical grade
@@ -1221,7 +1164,6 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                     })
 
                 except Exception as e:
-                    print(f"DEBUG - Error grading submission {submission_id}: {str(e)}")
                     errors.append({
                         'submission_id': submission_id,
                         'error': str(e)
@@ -1252,7 +1194,6 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
                 job.processed_submissions = processed_count
                 db.session.commit()
 
-            print(f"DEBUG - Job completed: {processed_count} submissions processed")
             job.status = 'completed'
             job.results = json.dumps({
                 'status': 'success',
@@ -1262,7 +1203,6 @@ def process_grading_job(app, job_id, submission_ids, rubric_id, skip_graded=True
             db.session.commit()
         
         except Exception as e:
-            print(f"DEBUG - Fatal error in grading job {job_id}: {str(e)}")
             job.status = 'failed'
             job.error_message = str(e)
             db.session.commit()
