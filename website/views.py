@@ -32,7 +32,7 @@ views = Blueprint('views', __name__)
 
 # Configure Gemini
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-1.5-pro')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 
 def extract_grade(text):
