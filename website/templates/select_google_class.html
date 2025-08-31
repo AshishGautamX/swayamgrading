@@ -1,0 +1,414 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Left Panel -->
+    <div class="side-panel">
+        <div class="class-actions">
+            <div class="dropdown">
+                <button class="btn btn-primary dropdown-toggle" 
+                        onclick="toggleDropdown()">
+                    <i class="fas fa-plus"></i> New Class
+                </button>
+                <div class="dropdown-menu" id="classDropdown">
+                    <div class="dropdown-item" 
+                        onclick="window.location.href='{{ url_for('views.import_google_classroom') }}'">
+                        <i class="fab fa-google"></i> Import from Google Classroom
+                    </div>
+                    <div class="dropdown-item"
+                        onclick="window.location.href='{{ url_for('views.create_class') }}'">
+                        <i class="fas fa-file-alt"></i> Create Manually
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="class-list sidebar-classes">
+            <h3 class="panel-title"><i class="fas fa-chalkboard"></i> My Classes</h3>
+            {% for class in current_user.classes %}
+            <div class="class-card" 
+                 onclick="window.location.href='{{ url_for('views.view_class', class_id=class.id) }}'">
+                <div class="class-header">
+                    <h3>{{ class.name }}</h3>
+                    <button class="btn-icon delete-class-btn" onclick="confirmDeleteClass({{ class.id }}, '{{ class.name }}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <p class="meta">{{ class.level|capitalize }} Level</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Main Panel -->
+    <div class="main-panel">
+        <!-- Page Header -->
+        <div class="assignment-header">
+            <h2><i class="fab fa-google"></i> Select Google Classroom Class</h2>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Available Classes</h3>
+            </div>
+            
+            <div class="google-class-list">
+                {% for class in classes %}
+                <form method="POST" class="google-class-card">
+                    <input type="hidden" name="class_id" value="{{ class.id }}">
+                    <div class="google-class-content">
+                        <div class="google-class-icon">
+                            <i class="fab fa-google"></i>
+                        </div>
+                        <div class="google-class-details">
+                            <h3>{{ class.name }}</h3>
+                            <p class="meta">Section: {{ class.section }}</p>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-file-import"></i> Import
+                    </button>
+                </form>
+                {% else %}
+                <div class="no-items">
+                    <i class="fas fa-info-circle"></i> No Google Classroom classes found
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function toggleDropdown() {
+        const dropdown = document.getElementById('classDropdown');
+        dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+    }
+
+    // Close dropdown when clicking outside
+    window.onclick = function(event) {
+        if (!event.target.matches('.dropdown-toggle')) {
+            const dropdowns = document.getElementsByClassName("dropdown-menu");
+            for (let i = 0; i < dropdowns.length; i++) {
+                dropdowns[i].style.display = 'none';
+            }
+        }
+    };
+    
+    // Delete class confirmation
+    function confirmDeleteClass(classId, className) {
+        // Prevent event propagation
+        event.stopPropagation();
+        
+        // Set the class name in the modal
+        document.getElementById('className').textContent = className;
+        
+        // Set the form action
+        document.getElementById('deleteClassForm').action = '/delete-class/' + classId;
+        
+        // Show the modal
+        document.getElementById('deleteClassModal').style.display = 'block';
+    }
+</script>
+
+<style>
+    /* Dashboard Container Layout */
+    .dashboard-container {
+        display: flex;
+        gap: 1.5rem;
+        min-height: calc(100vh - 60px);
+    }
+    
+    /* Side Panel Styles */
+    .side-panel {
+        width: 300px;
+        background-color: #f5f8fa;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+    
+    /* Panel Title Styles */
+    .panel-title {
+        margin-bottom: 1.5rem;
+        color: var(--tertiary);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* Main Panel Styles */
+    .main-panel {
+        flex: 1;
+        padding: 1.5rem;
+        background-color: #ffffff;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+    
+    /* Card Styles */
+    .card {
+        background-color: #fff;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+        border-left: 4px solid var(--secondary);
+    }
+    
+    /* Header Styles */
+    .assignment-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    
+    .assignment-header h2 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--tertiary);
+    }
+    
+    /* Google Class List Styles */
+    .google-class-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    .google-class-card {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        padding: 1rem 1.5rem;
+        transition: all 0.2s;
+        border-left: 4px solid #4285F4; /* Google blue */
+    }
+    
+    .google-class-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        background-color: #f1f3f5;
+    }
+    
+    .google-class-content {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-grow: 1;
+    }
+    
+    .google-class-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background-color: #4285F4;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+    }
+    
+    .google-class-details {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .google-class-details h3 {
+        margin: 0;
+        color: #333;
+        font-size: 1.1rem;
+    }
+    
+    /* Card Header Styles */
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #eaecef;
+    }
+    
+    .card-header h3 {
+        margin: 0;
+        color: var(--tertiary);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* Button Styles */
+    .btn {
+        cursor: pointer;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.2s;
+        border: none;
+    }
+    
+    .btn-primary {
+        background-color: var(--interactive);
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background-color: #48A6A7;
+        transform: translateY(-2px);
+    }
+    
+    /* Dropdown Styles */
+    .dropdown {
+        position: relative;
+        display: inline-block;
+    }
+    
+    .dropdown-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        text-align: left;
+    }
+    
+    .dropdown-menu {
+        display: none;
+        position: absolute;
+        background-color: white;
+        min-width: 220px;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        z-index: 1;
+        border-radius: 8px;
+        padding: 0.5rem 0;
+        margin-top: 0.25rem;
+    }
+    
+    .dropdown-item {
+        padding: 0.75rem 1rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .dropdown-item:hover {
+        background-color: #f1f3f5;
+    }
+    
+    /* Class List Styles */
+    .class-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .sidebar-classes .class-card {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+        overflow: hidden;
+        border-left: 4px solid var(--primary);
+    }
+    
+    .sidebar-classes .class-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    .class-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .class-header h3 {
+        margin: 0;
+        flex-grow: 1;
+        cursor: pointer;
+        transition: color 0.2s;
+    }
+    
+    .class-header h3:hover {
+        color: var(--interactive);
+    }
+    
+    .delete-class-btn {
+        color: #dc3545;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.35rem;
+        margin-left: 0.5rem;
+        transition: all 0.2s;
+        border-radius: 4px;
+    }
+    
+    .delete-class-btn:hover {
+        color: #bd2130;
+        background-color: rgba(220, 53, 69, 0.1);
+    }
+    
+    /* Meta Styles */
+    .meta {
+        color: #6c757d;
+        font-size: 0.85rem;
+        margin: 0.25rem 0 0;
+    }
+    
+    /* Class Actions */
+    .class-actions {
+        margin-bottom: 1.5rem;
+    }
+    
+    /* No Items Style */
+    .no-items {
+        text-align: center;
+        padding: 2rem;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        color: #6c757d;
+    }
+    
+    /* Responsive Design */
+    @media (max-width: 768px) {
+        .dashboard-container {
+            flex-direction: column;
+        }
+        
+        .side-panel {
+            width: 100%;
+        }
+        
+        .google-class-card {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        
+        .google-class-card .btn {
+            width: 100%;
+            justify-content: center;
+        }
+    }
+</style>
+{% endblock %}

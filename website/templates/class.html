@@ -1,0 +1,1297 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Left Panel -->
+    <div class="side-panel">
+        <div class="class-list">
+            <h3 class="panel-title"><i class="fas fa-chalkboard"></i> My Classes</h3>
+            {% for class in current_user.classes %}
+            <div class="class-card {% if class.id == cls.id %}active{% endif %}" 
+                 data-class-id="{{ class.id }}" 
+                 data-type="{{ class.type }}">
+                <div class="class-header">
+                    <h3>{{ class.name }}</h3>
+                    {% if class.type == 'google' %}
+                    <span class="badge"><i class="fab fa-google"></i> Google Classroom</span>
+                    {% endif %}
+                </div>
+                <p class="meta">{{ class.level|capitalize }} Level</p>
+                {% if class.type == 'google' %}
+                <div class="class-actions">
+                    <button class="btn btn-sm btn-refresh" onclick="refreshGoogleAssignments({{ class.id }}, event)">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn btn-sm btn-view" onclick="window.location.href='{{ url_for('views.view_class', class_id=class.id) }}'; event.stopPropagation();">
+                        <i class="fas fa-arrow-right"></i> View
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="main-panel">
+        <div class="assignment-header">
+            <h2><i class="fas fa-book"></i> {{ cls.name }} - Assignments</h2>
+            <div class="header-actions">
+                {% if cls.type == 'google' %}
+                <button class="btn btn-secondary" onclick="refreshGoogleAssignmentsAndReload({{ cls.id }})">
+                    <i class="fas fa-sync-alt"></i> Refresh All Assignments
+                </button>
+                {% endif %}
+                <button class="btn btn-primary" 
+                        onclick="window.location.href='{{ url_for('views.create_assignment', class_id=cls.id) }}'">
+                    <i class="fas fa-plus"></i> Add Assignment
+                </button>
+            </div>
+        </div>
+
+        <div class="assignment-grid">
+            {% for assignment in assignments %}
+            <div class="card assignment-card">
+                <div class="assignment-title-area">
+                    <h3 onclick="toggleSubmissionList({{ assignment.id }})">
+                        <i class="fas fa-file-alt"></i> {{ assignment.name }}
+                        <i class="fas fa-chevron-down toggle-icon" id="toggle-icon-{{ assignment.id }}"></i>
+                    </h3>
+                    <span class="submissions-count">{{ assignment.submissions|length }} submissions</span>
+                </div>
+                
+                <div class="question-container">
+                    <p class="question">{{ assignment.question }}</p>
+                </div>
+                
+                <div class="submission-list" id="submission-list-{{ assignment.id }}">
+                    <h4><i class="fas fa-tasks"></i> Submissions</h4>
+                    {% if assignment.submissions %}
+                        {% for submission in assignment.submissions %}
+                        <div class="submission-item">
+                            <span class="student-name" 
+                                  onclick="window.location.href='{{ url_for('views.deepgrade', submission_id=submission.id) }}'">
+                                <i class="fas fa-user-graduate"></i> {{ submission.student_name }}
+                            </span>
+                            
+                            <!-- Display file attachments if available -->
+                            {% if submission.submission_data is defined and submission.submission_data %}
+                                <div class="submission-files">
+                                    {% set submission_data = submission.submission_data|from_json %}
+                                    {% if submission_data and submission_data.files %}
+                                        {% for file in submission_data.files %}
+                                            {% if file.type == 'drive' %}
+                                                <a href="{{ file.link if file.link else url_for('views.view_attachment', submission_id=submission.id, file_id=file.id) }}" 
+                                                   class="file-link" target="_blank">
+                                                    <i class="fas fa-file"></i>
+                                                    {{ file.name }}
+                                                </a>
+                                            {% elif file.type == 'link' %}
+                                                <a href="{{ file.url }}" class="file-link" target="_blank">
+                                                    <i class="fas fa-link"></i>
+                                                    {{ file.name }}
+                                                </a>
+                                            {% endif %}
+                                        {% endfor %}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                            
+                            <div class="actions">
+                                <span class="grade-badge {% if submission.grade == 0 %}not-graded{% endif %}" 
+                                      onclick="window.location.href='{{ url_for('views.deepgrade', submission_id=submission.id) }}'">
+                                    {% if submission.grade == 0 %}
+                                        Not Graded
+                                    {% else %}
+                                        {{ submission.grade }}/100
+                                    {% endif %}
+                                </span>
+                                <button class="btn-icon" 
+                                onclick="navigateToDeepgrade('{{ submission.id }}');">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                                <button class="btn-icon btn-danger" 
+                                        onclick="confirmDeleteSubmission({{ submission.id }}, event)">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="no-items">
+                            <p><i class="fas fa-info-circle"></i> No submissions yet</p>
+                        </div>
+                    {% endif %}
+                </div>
+                    
+                <div class="assignment-actions">
+                    <button class="btn btn-secondary" 
+                            onclick="window.location.href='{{ url_for('views.add_submission', assignment_id=assignment.id) }}'">
+                        <i class="fas fa-plus"></i> Add Submission
+                    </button>
+                    <button class="btn btn-ai" 
+                            onclick="gradeAllSubmissions({{ assignment.id }})"
+                            id="grade-all-btn-{{ assignment.id }}">
+                        <i class="fas fa-robot"></i> Grade All Submissions
+                    </button>
+                    <button class="btn btn-danger" 
+                            onclick="confirmDeleteAssignment({{ assignment.id }})">
+                        <i class="fas fa-trash"></i> Delete Assignment
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+            
+            {% if not assignments %}
+            <div class="empty-state">
+                <div class="empty-icon">
+                    <i class="fas fa-folder-open"></i>
+                </div>
+                <h3>No Assignments Yet</h3>
+                <p>Start by creating an assignment for this class</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Grade All Progress Modal -->
+<div class="modal" id="gradeProgressModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2><i class="fas fa-robot"></i> AI Grading Assistant</h2>
+            <span class="close-modal">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="grading-status">
+                <div class="timer-indicator">
+                    <i class="fas fa-hourglass-half"></i>
+                    <span>Your grading will be complete soon (~30 seconds per submission)</span>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-bar" id="gradeProgressBar"></div>
+                </div>
+                <p id="gradeProgressText">Preparing to grade submissions...</p>
+            </div>
+            <div id="gradeResultsContainer">
+                <h3>Grading Results</h3>
+                <div id="gradeResults"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="closeGradeModal">Close & Refresh</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Dashboard Container Layout */
+.dashboard-container {
+    display: flex;
+    gap: 1.5rem;
+    min-height: calc(100vh - 60px);
+}
+
+/* Side Panel Styles */
+.side-panel {
+    width: 300px;
+    background-color: #f5f8fa;
+    border-radius: 10px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Panel Title Styles */
+.panel-title {
+    margin-bottom: 1.5rem;
+    color: var(--tertiary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Main Panel Styles */
+.main-panel {
+    flex: 1;
+    padding: 1.5rem;
+    background-color: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Assignment Grid Layout */
+.assignment-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Card Styles */
+.card {
+    background-color: #fff;
+    border-radius: 10px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    transition: transform 0.2s, box-shadow 0.2s;
+    border-left: 4px solid var(--secondary);
+}
+
+.card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+}
+
+.assignment-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+/* Assignment Header Styles */
+.assignment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.assignment-header h2 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--tertiary);
+}
+
+.header-actions {
+    display: flex;
+    gap: 10px;
+}
+
+/* Assignment Title Area */
+.assignment-title-area {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #eaecef;
+}
+
+.assignment-title-area h3 {
+    margin: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.submissions-count {
+    font-size: 0.85rem;
+    color: #6c757d;
+    background-color: #f8f9fa;
+    padding: 0.25rem 0.75rem;
+    border-radius: 15px;
+}
+
+/* Button Styles */
+.btn {
+    cursor: pointer;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+    border: none;
+}
+
+.btn-sm {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+.btn-primary {
+    background-color: var(--interactive);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #48A6A7;
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background-color: #e9ecef;
+    color: #495057;
+}
+
+.btn-secondary:hover {
+    background-color: #dee2e6;
+}
+
+.btn-danger {
+    background-color: #dc3545;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #bd2130;
+}
+
+.btn-ai {
+    background-color: #6c5ce7;
+    color: white;
+}
+
+.btn-ai:hover {
+    background-color: #5e46e5;
+    transform: translateY(-2px);
+}
+
+.btn-refresh {
+    background-color: #e9ecef;
+    color: #495057;
+}
+
+.btn-view {
+    background-color: var(--interactive);
+    color: white;
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    color: #6c757d;
+    padding: 0.35rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-icon:hover {
+    background-color: #f1f3f5;
+    color: #495057;
+}
+
+.btn-icon.btn-danger {
+    color: #dc3545;
+    background: none;
+}
+
+.btn-icon.btn-danger:hover {
+    background-color: rgba(220, 53, 69, 0.1);
+}
+
+/* Class List and Card Styles */
+.class-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.class-card {
+    background-color: white;
+    padding: 1rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    transition: transform 0.2s, box-shadow 0.2s;
+    overflow: hidden;
+    border-left: 4px solid var(--primary);
+    cursor: pointer;
+}
+
+.class-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.class-card.active {
+    border-left: 4px solid var(--interactive);
+    background-color: #e6f7f8;
+}
+
+.class-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+/* Question Container Styles */
+.question-container {
+    background-color: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    border-left: 3px solid var(--secondary);
+}
+
+/* Submission List Styles */
+.submission-list {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.5s ease;
+}
+
+.submission-list.expanded {
+    max-height: 1000px;
+}
+
+.submission-list h4 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.submission-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+}
+
+.student-name {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.2s;
+    color: #343a40;
+}
+
+.student-name:hover {
+    color: var(--interactive);
+}
+
+.student-name:before {
+    content: '\f007';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+    color: #4b6cb7;
+    font-size: 14px;
+}
+
+.actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Grade Badge Styles */
+.grade-badge {
+    background-color: var(--primary);
+    color: #495057;
+    padding: 0.25rem 0.75rem;
+    border-radius: 15px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.grade-badge:hover {
+    background-color: #d0ebff;
+}
+
+.grade-badge.not-graded {
+    background-color: #f1f5f9;
+    color: #64748b;
+}
+
+/* File Link Styles */
+.submission-files {
+    margin: 5px 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.file-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    background-color: #f1f5f9;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: #4b5563;
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.file-link i {
+    margin-right: 5px;
+    color: #6366f1;
+}
+
+.file-link:hover {
+    background-color: #e2e8f0;
+    color: #1e293b;
+}
+
+/* Toggle Icon Styles */
+.toggle-icon {
+    margin-left: 8px;
+    font-size: 0.8em;
+    transition: transform 0.3s ease;
+}
+
+.toggle-icon.rotated {
+    transform: rotate(-180deg);
+}
+
+/* Assignment Actions */
+.assignment-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    justify-content: flex-end;
+}
+
+/* Empty State Styles */
+.empty-state {
+    text-align: center;
+    padding: 3rem 2rem;
+    background-color: #f8f9fa;
+    border-radius: 10px;
+    color: #6c757d;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.empty-icon {
+    font-size: 3rem;
+    color: #adb5bd;
+    margin-bottom: 1rem;
+}
+
+.empty-state h3 {
+    margin: 0;
+    color: #495057;
+}
+
+.empty-state p {
+    margin: 0;
+}
+
+/* Badge Styles */
+.badge {
+    background-color: #f1f3f5;
+    color: #495057;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+/* Meta Styles */
+.meta {
+    color: #6c757d;
+    font-size: 0.85rem;
+    margin: 0.25rem 0 0.5rem;
+}
+
+/* Class Header Styles */
+.class-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.class-header h3 {
+    margin: 0;
+    flex-grow: 1;
+}
+
+/* No Items Style */
+.no-items {
+    text-align: center;
+    padding: 1rem;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    color: #6c757d;
+}
+
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.5);
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-content {
+    background-color: #fff;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 600px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+    animation: modalFadeIn 0.3s ease;
+}
+
+#gradeProgressModal .modal-content {
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+    max-width: 550px;
+    width: 90%;
+}
+
+@keyframes modalFadeIn {
+    from {opacity: 0; transform: translateY(-20px);}
+    to {opacity: 1; transform: translateY(0);}
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid #e9ecef;
+}
+
+#gradeProgressModal .modal-header {
+    background: linear-gradient(135deg, #4b6cb7 0%, #182848 100%);
+    color: white;
+    border-radius: 12px 12px 0 0;
+    padding: 16px 20px;
+}
+
+.modal-header h2 {
+    margin: 0;
+    color: var(--tertiary);
+}
+
+#gradeProgressModal .modal-header h2 {
+    font-weight: 600;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.close-modal {
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #adb5bd;
+    transition: color 0.2s;
+}
+
+.close-modal:hover {
+    color: #495057;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+#gradeProgressModal .modal-body {
+    padding: 25px;
+}
+
+.modal-footer {
+    padding: 1rem 1.5rem;
+    display: flex;
+    justify-content: flex-end;
+    border-top: 1px solid #e9ecef;
+}
+
+.grading-status {
+    margin-bottom: 20px;
+}
+
+.timer-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background-color: #f8f9fa;
+    border-left: 4px solid #4b6cb7;
+    padding: 12px 15px;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.timer-indicator i {
+    color: #4b6cb7;
+    font-size: 22px;
+    animation: pulse 2s infinite;
+}
+
+.timer-indicator span {
+    font-size: 14px;
+    color: #495057;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+/* Progress Bar Styles */
+.progress-container {
+    height: 12px;
+    background-color: #e9ecef;
+    border-radius: 6px;
+    margin: 15px 0;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%);
+    width: 0%;
+    transition: width 0.5s ease;
+    border-radius: 6px;
+}
+
+#gradeProgressText {
+    font-size: 14px;
+    color: #495057;
+    text-align: center;
+    margin-top: 10px;
+}
+
+#gradeResultsContainer {
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 1.5rem;
+    display: none;
+}
+
+#gradeResultsContainer h3 {
+    font-size: 16px;
+    color: #343a40;
+    margin-top: 0;
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+#gradeResults {
+    max-height: 250px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.result-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 15px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background-color: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    transition: all 0.2s ease;
+}
+
+.result-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 5px rgba(0,0,0,0.1);
+}
+
+.result-success {
+    color: #28a745;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.result-success:before {
+    content: '\f00c';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
+.result-error {
+    color: #dc3545;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.result-error:before {
+    content: '\f071';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
+.result-skip {
+    color: #6c757d;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.result-skip:before {
+    content: '\f05e';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
+#closeGradeModal {
+    background-color: #4b6cb7;
+    color: white;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+#closeGradeModal:hover {
+    background-color: #182848;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .dashboard-container {
+        flex-direction: column;
+    }
+    
+    .side-panel {
+        width: 100%;
+    }
+    
+    .assignment-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+    
+    .header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+    
+    .submission-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+    
+    .assignment-actions {
+        flex-direction: column;
+        align-items: flex-end;
+    }
+    
+    .btn {
+        width: 100%;
+    }
+}
+</style>
+
+<script>
+// Grade all submissions for an assignment
+// Grade all submissions for an assignment
+function gradeAllSubmissions(assignmentId) {
+    // Get the button and show loading state
+    const gradeButton = document.getElementById(`grade-all-btn-${assignmentId}`);
+    const originalHTML = gradeButton.innerHTML;
+    gradeButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+    gradeButton.disabled = true;
+    
+    // Show the modal
+    const modal = document.getElementById('gradeProgressModal');
+    const progressBar = document.getElementById('gradeProgressBar');
+    const progressText = document.getElementById('gradeProgressText');
+    const resultsContainer = document.getElementById('gradeResultsContainer');
+    const resultsDiv = document.getElementById('gradeResults');
+    const timerIndicator = document.querySelector('.timer-indicator');
+    
+    // Reset the modal state
+    progressBar.style.width = '0%';
+    progressText.textContent = 'Initializing AI grading system...';
+    resultsContainer.style.display = 'none';
+    resultsDiv.innerHTML = '';
+    modal.style.display = 'flex';
+    
+    // Show timer indicator by default
+    if (timerIndicator) {
+        timerIndicator.style.display = 'flex';
+    }
+    
+    // Get all submissions for this assignment
+    fetch(`{{ url_for('views.grade_all_submissions', assignment_id=0) }}`.replace('0', assignmentId), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.job_id) {
+            // Start polling for job status
+            pollGradingStatus(data.job_id, assignmentId, progressBar, progressText, resultsDiv, resultsContainer);
+        } else if (data.status === 'complete' && data.message) {
+            // Handle case where all submissions are already graded
+            // Hide timer indicator as no grading is happening
+            if (timerIndicator) {
+                timerIndicator.style.display = 'none';
+            }
+            
+            progressBar.style.width = '100%';
+            progressBar.style.background = 'linear-gradient(90deg, #28a745 0%, #20c997 100%)';
+            progressText.textContent = data.message;
+            resultsContainer.style.display = 'block';
+            resultsDiv.innerHTML = '<div class="result-item"><span class="student-name">All Students</span><span class="result-success">Already Graded</span></div>';
+            
+            // Reset button state
+            gradeButton.innerHTML = originalHTML;
+            gradeButton.disabled = false;
+        } else {
+            throw new Error('No job ID returned from server');
+        }
+    })
+    .catch(error => {
+        console.error('Error starting grading job:', error);
+        progressText.textContent = `Error: ${error.message}`;
+        progressBar.style.width = '100%';
+        progressBar.style.background = 'linear-gradient(90deg, #dc3545 0%, #c71f3d 100%)';
+        
+        // Hide timer indicator on error
+        if (timerIndicator) {
+            timerIndicator.style.display = 'none';
+        }
+        
+        // Restore button state
+        gradeButton.innerHTML = originalHTML;
+        gradeButton.disabled = false;
+    });
+}
+
+// Poll for grading job status
+// Poll for grading job status
+function pollGradingStatus(jobId, assignmentId, progressBar, progressText, resultsDiv, resultsContainer) {
+    const gradeButton = document.getElementById(`grade-all-btn-${assignmentId}`);
+    const timerIndicator = document.querySelector('.timer-indicator');
+    
+    // Initially show the timer indicator when starting the grading process
+    if (timerIndicator) {
+        timerIndicator.style.display = 'flex';
+    }
+    
+    // Function to check job status
+    function checkStatus() {
+        fetch(`/check-grading-status/${jobId}`, {
+            headers: {
+                'Accept': 'application/json',
+            }
+        })
+        .then(response => {
+            // Handle 404 errors by continuing to poll (the job might not be in the database yet)
+            if (!response.ok && response.status === 404) {
+                console.log(`Job ${jobId} not found yet, will retry...`);
+                progressText.textContent = 'Preparing submissions for grading...';
+                progressBar.style.width = '5%';
+                setTimeout(checkStatus, 2000); // Retry after 2 seconds
+                return null;
+            }
+            return response.json();
+        })
+        .then(data => {
+            // If we got a null response (from 404 handling), just return
+            if (data === null) return;
+            
+            // Update progress bar
+            const progress = data.progress || 0;
+            progressBar.style.width = `${progress}%`;
+            
+            // Update status message
+            let statusMessage = data.status || 'Processing...';
+            if (progress > 0 && progress < 100) {
+                statusMessage += ` (${Math.round(progress)}% complete)`;
+            }
+            progressText.textContent = statusMessage;
+            
+            // Check if job is complete
+            if (data.complete) {
+                // Hide timer indicator when grading is complete
+                if (timerIndicator) {
+                    timerIndicator.style.display = 'none';
+                }
+                
+                // Show results
+                if (data.results && data.results.length > 0) {
+                    resultsContainer.style.display = 'block';
+                    resultsDiv.innerHTML = ''; // Clear any previous results
+                    
+                    // Display each result in a clearer format
+                    data.results.forEach(result => {
+                        const resultItem = document.createElement('div');
+                        resultItem.className = 'result-item';
+                        
+                        let statusClass = 'result-success';
+                        let statusText = '';
+                        
+                        if (result.error) {
+                            statusClass = 'result-error';
+                            statusText = 'Error processing';
+                        } else if (result.skipped) {
+                            statusClass = 'result-skip';
+                            statusText = 'Already Graded';
+                        } else {
+                            statusText = result.grade || 'Graded';
+                        }
+                        
+                        resultItem.innerHTML = `
+                            <span class="${statusClass}">${statusText}</span>
+                        `;
+                        resultsDiv.appendChild(resultItem);
+                    });
+                } else {
+                    resultsContainer.style.display = 'block';
+                    resultsDiv.innerHTML = '<div class="result-item"><span class="result-success">Grading completed</span></div>';
+                }
+                
+                // Update progress text for completion
+                progressText.textContent = 'Grading completed successfully!';
+                
+                // Reset button
+                gradeButton.innerHTML = '<i class="fas fa-robot"></i> Grade All Submissions';
+                gradeButton.disabled = false;
+                
+                return; // Stop polling
+            }
+            
+            // Continue polling
+            setTimeout(checkStatus, 1000);
+        })
+        .catch(error => {
+            console.error('Error checking grading status:', error);
+            progressText.textContent = 'Processing submissions...';
+            
+            // Continue polling despite errors - the job might still be processing
+            setTimeout(checkStatus, 2000);
+        });
+    }
+    
+    // Start polling
+    setTimeout(checkStatus, 1000);
+}
+
+
+// Initialize the submission lists to be collapsed and setup modals
+document.addEventListener('DOMContentLoaded', function() {
+    // Hide all submission lists by default
+    const submissionLists = document.querySelectorAll('.submission-list');
+    submissionLists.forEach(list => {
+        list.classList.remove('expanded');
+    });
+    
+    // Add click event listeners to class cards
+    const classCards = document.querySelectorAll('.class-card');
+    classCards.forEach(card => {
+        card.addEventListener('click', function() {
+            window.location.href = `{{ url_for('views.view_class', class_id=0) }}`.replace('0', card.dataset.classId);
+        });
+    });
+    
+    // Setup modal close buttons
+    const closeModal = document.querySelector('.close-modal');
+    const closeModalButton = document.getElementById('closeGradeModal');
+    const gradeProgressModal = document.getElementById('gradeProgressModal');
+    
+    // Function to close the modal and refresh the page
+    function closeModalAndRefresh() {
+        gradeProgressModal.style.display = 'none';
+        window.location.reload(); // Refresh the page when modal is closed
+    }
+    
+    if (closeModal) {
+        closeModal.addEventListener('click', closeModalAndRefresh);
+    }
+    
+    if (closeModalButton) {
+        closeModalButton.addEventListener('click', closeModalAndRefresh);
+    }
+    
+    // Close modal if clicking outside of it
+    window.addEventListener('click', function(event) {
+        if (event.target === gradeProgressModal) {
+            closeModalAndRefresh();
+        }
+    });
+});
+
+    
+    // Add CSS for better display of grading results
+    const style = document.createElement('style');
+    style.textContent = `
+        #gradeResults {
+            margin-top: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+        }
+        .student-name {
+            font-weight: 500;
+        }
+        .result-success {
+            color: #28a745;
+            font-weight: 500;
+        }
+        .result-error {
+            color: #dc3545;
+        }
+        .result-skip {
+            color: #6c757d;
+        }
+    `;
+    document.head.appendChild(style);
+
+
+// Delete assignment confirmation
+function confirmDeleteAssignment(assignmentId) {
+    if (confirm("Are you sure you want to delete this assignment? This will also delete all submissions.")) {
+        window.location.href = "{{ url_for('views.delete_assignment', assignment_id=0) }}".replace('0', assignmentId);
+    }
+}
+
+// Delete submission confirmation
+function confirmDeleteSubmission(submissionId, event) {
+    event.stopPropagation(); // Prevent triggering parent onclick events
+    if (confirm("Are you sure you want to delete this submission?")) {
+        window.location.href = "{{ url_for('views.delete_submission', submission_id=0) }}".replace('0', submissionId);
+    }
+}
+
+// Toggle submission list visibility
+function toggleSubmissionList(assignmentId) {
+    const submissionList = document.getElementById(`submission-list-${assignmentId}`);
+    const toggleIcon = document.getElementById(`toggle-icon-${assignmentId}`);
+    
+    submissionList.classList.toggle('expanded');
+    toggleIcon.classList.toggle('rotated');
+}
+
+// Refresh Google assignments for a specific class
+function refreshGoogleAssignments(classId, event) {
+    event.stopPropagation(); // Prevent triggering parent onclick events
+    
+    // Show loading indicator
+    const refreshButton = event.currentTarget;
+    const originalHTML = refreshButton.innerHTML;
+    refreshButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+    refreshButton.disabled = true;
+    
+    // Make AJAX request to refresh assignments
+    fetch(`{{ url_for('views.refresh_google_assignments', class_id=0) }}`.replace('0', classId), {
+        method: 'GET',
+        headers: {
+            'Accept': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success message
+            alert("Assignments refreshed successfully!");
+        } else if (data.redirect) {
+            // Handle redirection for authentication
+            alert("Your Google authentication has expired. You will be redirected to reconnect.");
+            window.location.href = data.redirect;
+        } else {
+            // Show error message
+            alert("Failed to refresh assignments: " + data.message);
+        }
+    })
+    .catch(error => {
+        console.error("Error refreshing assignments:", error);
+        alert("An error occurred while refreshing assignments. Please try again later.");
+    })
+    .finally(() => {
+        // Restore button state if we're still on the page
+        if (document.body.contains(refreshButton)) {
+            refreshButton.innerHTML = originalHTML;
+            refreshButton.disabled = false;
+        }
+    });
+}
+
+// Refresh Google assignments and reload the page
+function refreshGoogleAssignmentsAndReload(classId) {
+    // Show loading indicator
+    const refreshButton = document.querySelector('.btn-secondary');
+    const originalHTML = refreshButton.innerHTML;
+    refreshButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+    refreshButton.disabled = true;
+    
+    // Make request to refresh assignments
+    fetch(`{{ url_for('views.refresh_google_assignments', class_id=0) }}`.replace('0', classId), {
+        headers: {
+            'Accept': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload the page
+            window.location.reload();
+        } else if (data.redirect) {
+            // Handle redirection for authentication
+            window.location.href = data.redirect;
+        } else {
+            alert("Failed to refresh assignments: " + data.message);
+            refreshButton.innerHTML = originalHTML;
+            refreshButton.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error("Error refreshing assignments:", error);
+        alert("An error occurred while refreshing assignments. Please try again later.");
+        refreshButton.innerHTML = originalHTML;
+        refreshButton.disabled = false;
+    });
+}
+
+function navigateToDeepgrade(submissionId) {
+    if (!submissionId) {
+        alert("Error: Submission ID is missing!"); // Debugging message
+        return;
+    }
+    window.location.href = `/grade-submission/${submissionId}`;
+}
+</script>
+{% endblock %}

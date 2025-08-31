@@ -1,0 +1,27 @@
+<!-- templates/partials/rubric_form.html -->
+<div class="rubric-form">
+    <h2>Create New Rubric</h2>
+    <form onsubmit="handleRubricSubmit(event)" 
+          method="POST" 
+          action="{{ url_for('views.create_rubric') }}">
+        <div class="form-group">
+            <label>Rubric Name</label>
+            <input type="text" name="name" required>
+        </div>
+        <div class="form-group">
+            <label>Description</label>
+            <textarea name="description" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Level</label>
+            <select name="level" required>
+                <option value="Primary">Primary</option>
+                <option value="Middle School">Middle School</option>
+                <option value="High School">High School</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">
+            <i class="fas fa-save"></i> Create Rubric
+        </button>
+    </form>
+</div>

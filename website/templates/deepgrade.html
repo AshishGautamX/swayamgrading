@@ -1,0 +1,914 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Left Panel - Submission Details -->
+    <div class="side-panel">
+        <div class="card">
+            <h2>{{ assignment.name }}</h2>
+            <div class="submission-meta">
+                <span class="student-name">{{ submission.student_name }}</span>
+                
+                <!-- Email input field that shows current email or allows entry of a new one -->
+                <div class="email-input-container">
+                    <label for="student-email">Student Email:</label>
+                    <div class="email-field">
+                        <input type="email" id="student-email" class="form-control" 
+                               value="{{ submission.student_email or '' }}" 
+                               placeholder="Enter student email">
+                        <button id="save-email-btn" class="btn btn-outline-primary">
+                            <i class="fas fa-save"></i>
+                        </button>
+                    </div>
+                    <span id="email-status" class="email-status"></span>
+                </div>
+            </div>
+            
+            <div class="question-section">
+                <h3>Question</h3>
+                <p>{{ assignment.question }}</p>
+            </div>
+            
+            <div class="answer-section">
+                <h3>Student Answer</h3>
+                
+                <!-- Display text answer if available -->
+                {% if submission.student_answer %}
+                <div class="student-answer">
+                    {% if submission.student_answer|trim %}
+                        {{ submission.student_answer|replace('\n', '<br>')|safe }}
+                    {% else %}
+                        <p class="no-answer">No text answer available.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Display file attachments if available -->
+                {% if submission.submission_data %}
+                <div class="file-attachments">
+                    <h4>File Attachments</h4>
+                    {% set submission_data = submission.submission_data|tojson|safe %}
+                    {% set files = submission_data|from_json %}
+                    {% if files and files.files %}
+                        <ul class="attachment-list">
+                            {% for file in files.files %}
+                                <li class="attachment-item">
+                                    {% if file.type == 'drive' %}
+                                        <a href="{{ url_for('views.view_attachment', submission_id=submission.id, file_id=file.id) }}" target="_blank" class="attachment-link">
+                                            <i class="fas fa-file"></i> {{ file.name }}
+                                        </a>
+                                        {% if loop.first and not submission.student_answer|trim %}
+                                            <!-- Show extracted text toggle for first file if no direct text answer -->
+                                            <button class="btn btn-sm btn-outline-secondary toggle-extracted-text" data-file-id="{{ file.id }}">
+                                                <i class="fas fa-eye"></i> Show Extracted Text
+                                            </button>
+                                            <div class="extracted-text-container" id="extracted-text-{{ file.id }}" style="display: none;">
+                                                <div class="extracted-text-content">
+                                                    <!-- Content will be populated via JavaScript -->
+                                                </div>
+                                            </div>
+                                        {% endif %}
+                                    {% elif file.type == 'link' %}
+                                        <a href="{{ file.url }}" target="_blank" class="attachment-link">
+                                            <i class="fas fa-link"></i> {{ file.name }}
+                                        </a>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p>No file information available.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Show message if no answer or attachments -->
+                {% if not submission.student_answer and not submission.submission_data %}
+                <p class="no-answer">No answer submitted yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel - Grading Interface -->
+    <div class="main-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2>AI Grading</h2>
+                <div class="action-buttons">
+                    <!-- Grading Form -->
+                    <form id="grade-form" class="d-inline">
+                        <input type="hidden" name="submission_id" value="{{ submission.id }}">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-robot"></i> Generate Grade
+                        </button>
+                    </form>
+                    
+                    <!-- Send Grade Button -->
+                    <form id="send-grade-form" class="d-inline">
+                        <input type="hidden" name="submission_id" value="{{ submission.id }}">
+                        <button type="submit" class="btn btn-success" id="send-grade-btn" disabled>
+                            <i class="fas fa-paper-plane"></i> Send Grade to Student
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Grading Results -->
+            <div class="grading-results">
+                <h3>AI Feedback</h3>
+                <div id="ai-feedback">
+                    {% if ai_feedback %}
+                        {% if ai_feedback is string %}
+                            <p>{{ ai_feedback }}</p>
+                        {% else %}
+                            <div class="feedback-section">
+                                <h4>Feedback</h4>
+                                <p>{{ ai_feedback.feedback }}</p>
+                            </div>
+                            <div class="grade-section">
+                                <h4>Grade</h4>
+                                <p class="grade">{{ ai_feedback.grade }}</p>
+                            </div>
+                            <div class="summary-section">
+                                <h4>Summary</h4>
+                                <p>{{ ai_feedback.summary }}</p>
+                            </div>
+                            <div class="glow-section">
+                                <h4>Glow</h4>
+                                <p>{{ ai_feedback.glow }}</p>
+                            </div>
+                            <div class="grow-section">
+                                <h4>Grow</h4>
+                                <p>{{ ai_feedback.grow }}</p>
+                            </div>
+                            <div class="think-about-it-section">
+                                <h4>Think About It</h4>
+                                <p>{{ ai_feedback.think_about_it }}</p>
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <div class="empty-feedback">
+                            <i class="fas fa-graduation-cap"></i>
+                            <p>No feedback available yet. Click "Generate Grade" to create AI feedback.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const emailInput = document.getElementById("student-email");
+        const saveEmailBtn = document.getElementById("save-email-btn");
+        const emailStatus = document.getElementById("email-status");
+        const sendGradeBtn = document.getElementById("send-grade-btn");
+        
+        // Check if email is available and update send grade button state
+        function updateSendGradeButtonState() {
+            const hasEmail = emailInput.value.trim() !== '';
+            const hasFeedback = document.querySelector('.feedback-section') !== null;
+            sendGradeBtn.disabled = !(hasEmail && hasFeedback);
+        }
+        
+        // Initialize send grade button state
+        updateSendGradeButtonState();
+        
+        // Save email button click handler
+        saveEmailBtn.addEventListener("click", async function() {
+            const email = emailInput.value.trim();
+            
+            if (!email) {
+                emailStatus.textContent = "Please enter an email address";
+                emailStatus.className = "email-status error";
+                return;
+            }
+            
+            // Email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                emailStatus.textContent = "Please enter a valid email address";
+                emailStatus.className = "email-status error";
+                return;
+            }
+            
+            try {
+                const response = await fetch("/update-student-email/{{ submission.id }}", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        email: email
+                    })
+                });
+                
+                if (response.ok) {
+                    emailStatus.textContent = "Email saved successfully!";
+                    emailStatus.className = "email-status success";
+                    updateSendGradeButtonState();
+                    
+                    // Clear the status message after 3 seconds
+                    setTimeout(() => {
+                        emailStatus.textContent = "";
+                        emailStatus.className = "email-status";
+                    }, 3000);
+                } else {
+                    const error = await response.json();
+                    emailStatus.textContent = error.error || "Failed to save email";
+                    emailStatus.className = "email-status error";
+                }
+            } catch (error) {
+                console.error("Save email error:", error);
+                emailStatus.textContent = "Failed to save email: " + error.message;
+                emailStatus.className = "email-status error";
+            }
+        });
+        
+        // Email input change handler
+        emailInput.addEventListener("input", function() {
+            updateSendGradeButtonState();
+        });
+        
+        // Add event listeners for the "Show Extracted Text" buttons
+        document.querySelectorAll('.toggle-extracted-text').forEach(button => {
+            button.addEventListener('click', async function() {
+                const fileId = this.getAttribute('data-file-id');
+                const extractedTextContainer = document.getElementById(`extracted-text-${fileId}`);
+                
+                if (extractedTextContainer.style.display === 'none') {
+                    // Show the container
+                    extractedTextContainer.style.display = 'block';
+                    
+                    // Change button text
+                    this.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Extracted Text';
+                    
+                    // Get the submission ID from the URL
+                    const submissionId = window.location.pathname.split('/').pop();
+                    
+                    // If container is empty, fetch the extracted text
+                    if (!extractedTextContainer.querySelector('.extracted-text-content').innerHTML.trim()) {
+                        try {
+                            // Show loading indicator
+                            extractedTextContainer.querySelector('.extracted-text-content').innerHTML = '<div class="loading-text">Loading extracted text...</div>';
+                            
+                            // Fetch the extracted text
+                            const response = await fetch(`/get-extracted-text/${submissionId}/${fileId}`);
+                            
+                            if (response.ok) {
+                                const data = await response.json();
+                                if (data.text) {
+                                    extractedTextContainer.querySelector('.extracted-text-content').innerHTML = 
+                                        data.text.replace(/\n/g, '<br>');
+                                } else {
+                                    extractedTextContainer.querySelector('.extracted-text-content').innerHTML = 
+                                        '<p class="text-muted">No text could be extracted from this file.</p>';
+                                }
+                            } else {
+                                extractedTextContainer.querySelector('.extracted-text-content').innerHTML = 
+                                    '<p class="text-danger">Failed to load extracted text.</p>';
+                            }
+                        } catch (error) {
+                            console.error("Error fetching extracted text:", error);
+                            extractedTextContainer.querySelector('.extracted-text-content').innerHTML = 
+                                `<p class="text-danger">Error: ${error.message}</p>`;
+                        }
+                    }
+                } else {
+                    // Hide the container
+                    extractedTextContainer.style.display = 'none';
+                    
+                    // Change button text back
+                    this.innerHTML = '<i class="fas fa-eye"></i> Show Extracted Text';
+                }
+            });
+        });
+        
+        // Grade form submission handler
+        document.getElementById("grade-form").addEventListener("submit", async function(event) {
+            event.preventDefault();
+            
+            let formData = new FormData(this);
+            let feedbackElement = document.getElementById("ai-feedback");
+            let submitButton = this.querySelector('button[type="submit"]');
+            
+            // Change button appearance and disable it
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Grading...';
+            
+            feedbackElement.innerHTML = `
+                <div class="loading">
+                    <i class="fas fa-robot robot-loading"></i>
+                    <p>AI is analyzing the submission...</p>
+                    <div class="loading-spinner"></div>
+                </div>`;
+            
+            try {
+                let response = await fetch("/grade-submission/{{ submission.id }}", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        submission_id: formData.get("submission_id")
+                    })
+                });
+                
+                // Reset button state
+                submitButton.disabled = false;
+                submitButton.innerHTML = '<i class="fas fa-robot"></i> Generate Grade';
+                
+                if (response.ok) {
+                    let result = await response.json();
+                    console.log("Response from server:", result);
+                    
+                    // Update send grade button state
+                    updateSendGradeButtonState();
+                    
+                    if (result.error) {
+                        feedbackElement.innerHTML = `<div class="error"><i class="fas fa-exclamation-triangle"></i> Error: ${result.error}</div>`;
+                    } else {
+                        // Format grade to ensure it's in the correct format
+                        let grade = result.grade || "0/100";
+                        if (!grade.includes("/")) {
+                            grade = `${grade}/100`;
+                        }
+                        
+                        // Handle rubric display
+                        let rubricHtml = "";
+                        if (result.rubric && typeof result.rubric === 'object') {
+                            rubricHtml = "<ul>";
+                            for (const [key, value] of Object.entries(result.rubric)) {
+                                // Handle both string and object rubric formats
+                                if (typeof value === 'object') {
+                                    rubricHtml += `
+                                        <li>
+                                            <strong>${key}:</strong>
+                                            <div class="rubric-detail">
+                                                <div><strong>Rating:</strong> ${value.rating || 'N/A'}</div>
+                                                <div><strong>Score:</strong> ${value.score || 'N/A'}</div>
+                                                <div><strong>Explanation:</strong> ${value.explanation || 'No explanation provided'}</div>
+                                            </div>
+                                        </li>`;
+                                } else {
+                                    rubricHtml += `<li><strong>${key}:</strong> ${value}</li>`;
+                                }
+                            }
+                            rubricHtml += "</ul>";
+                        } else {
+                            rubricHtml = "<p>No detailed rubric available.</p>";
+                        }
+                        
+                        // Update the DOM with the structured feedback
+                        feedbackElement.innerHTML = `
+                            <div class="feedback-section">
+                                <h4><i class="fas fa-comments"></i> Feedback</h4>
+                                <p>${result.feedback || 'No feedback available'}</p>
+                            </div>
+                            <div class="grade-section">
+                                <h4><i class="fas fa-star"></i> Grade</h4>
+                                <p class="grade">${grade}</p>
+                            </div>
+                            <div class="summary-section">
+                                <h4><i class="fas fa-file-alt"></i> Summary</h4>
+                                <p>${result.summary || 'No summary available'}</p>
+                            </div>
+                            <div class="glow-section">
+                                <h4><i class="fas fa-lightbulb"></i> Glow</h4>
+                                <p>${result.glow || 'No glow points available'}</p>
+                            </div>
+                            <div class="grow-section">
+                                <h4><i class="fas fa-seedling"></i> Grow</h4>
+                                <p>${result.grow || 'No grow points available'}</p>
+                            </div>
+                            <div class="think-about-it-section">
+                                <h4><i class="fas fa-brain"></i> Think About It</h4>
+                                <p>${result.think_about_it || 'No reflection points available'}</p>
+                            </div>
+                            <div class="rubric-section">
+                                <h4><i class="fas fa-list-check"></i> Rubric</h4>
+                                ${rubricHtml}
+                            </div>
+                        `;
+                    }
+                } else {
+                    let error = await response.json();
+                    feedbackElement.innerHTML = `<div class="error"><i class="fas fa-exclamation-circle"></i> Server error: ${error.error || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                console.error("Fetch error:", error);
+                feedbackElement.innerHTML = `<div class="error"><i class="fas fa-exclamation-triangle"></i> An error occurred: ${error.message || 'Please check your connection.'}</div>`;
+                
+                // Reset button state
+                submitButton.disabled = false;
+                submitButton.innerHTML = '<i class="fas fa-robot"></i> Generate Grade';
+            }
+        });
+        
+        // Send Grade Form Submission Handler
+        document.getElementById("send-grade-form").addEventListener("submit", async function(event) {
+            event.preventDefault();
+            
+            const email = emailInput.value.trim();
+            
+            if (!email) {
+                emailStatus.textContent = "Please enter a student email address before sending grade";
+                emailStatus.className = "email-status error";
+                return;
+            }
+            
+            let sendButton = document.getElementById("send-grade-btn");
+            
+            // Change button appearance and disable it
+            sendButton.disabled = true;
+            sendButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+            
+            try {
+                let response = await fetch("/send-grade/{{ submission.id }}", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        email: email // Send the current email value
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Open Gmail in a new tab
+                    window.open(data.redirect_url, '_blank');
+                    
+                    // Update button to indicate success
+                    sendButton.innerHTML = '<i class="fas fa-check"></i> Email Prepared';
+                    sendButton.classList.remove("btn-success");
+                    sendButton.classList.add("btn-secondary");
+                    
+                    // Show success message
+                    emailStatus.textContent = "Email preparation successful!";
+                    emailStatus.className = "email-status success";
+                    
+                    // Clear the status message after 3 seconds
+                    setTimeout(() => {
+                        emailStatus.textContent = "";
+                        emailStatus.className = "email-status";
+                    }, 3000);
+                } else {
+                    // Handle error
+                    const errorData = await response.json();
+                    sendButton.disabled = false;
+                    sendButton.innerHTML = '<i class="fas fa-paper-plane"></i> Send Grade to Student';
+                    emailStatus.textContent = "Error: " + (errorData.error || "Failed to prepare email");
+                    emailStatus.className = "email-status error";
+                    console.error("Email preparation error:", errorData);
+                }
+            } catch (error) {
+                console.error("Send grade error:", error);
+                sendButton.disabled = false;
+                sendButton.innerHTML = '<i class="fas fa-paper-plane"></i> Send Grade to Student';
+                emailStatus.textContent = "Failed to prepare email: " + error.message;
+                emailStatus.className = "email-status error";
+            }
+        });
+        
+        // Helper function to parse JSON safely
+        function safeJSONParse(json) {
+            try {
+                return JSON.parse(json);
+            } catch (e) {
+                console.error("Error parsing JSON:", e);
+                return null;
+            }
+        }
+    
+        // Parse submission data if available
+        {% if submission.submission_data %}
+            try {
+                // This will make the submission_data available to Jinja
+                var submissionData = {{ submission.submission_data|safe }};
+            } catch (e) {
+                console.error("Error with submission data:", e);
+            }
+        {% endif %}
+    });
+</script>
+
+<style>
+    /* Main layout */
+    .dashboard-container {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 2rem;
+        padding: 2rem;
+        background-color: #f0f5ff;
+        min-height: calc(100vh - 60px);
+    }
+    
+    .side-panel, .main-panel {
+        height: calc(100vh - 100px);
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: #d1d5db #f3f4f6;
+    }
+    
+    .side-panel::-webkit-scrollbar, .main-panel::-webkit-scrollbar {
+        width: 8px;
+    }
+    
+    .side-panel::-webkit-scrollbar-track, .main-panel::-webkit-scrollbar-track {
+        background: #f3f4f6;
+    }
+    
+    .side-panel::-webkit-scrollbar-thumb, .main-panel::-webkit-scrollbar-thumb {
+        background-color: #d1d5db;
+        border-radius: 20px;
+    }
+    
+    /* Card styling */
+    .card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        padding: 1.5rem;
+        border: none;
+        transition: transform 0.2s ease-in-out;
+    }
+    
+    .card:hover {
+        transform: translateY(-3px);
+    }
+    
+    .card h2 {
+        color: #2563eb;
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #e5e7eb;
+        padding-bottom: 0.5rem;
+    }
+    
+    .card h3 {
+        color: #3b82f6;
+        font-size: 1.2rem;
+        margin: 1.2rem 0 0.7rem;
+    }
+    
+    /* Card header with action buttons */
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        border-bottom: 2px solid #e5e7eb;
+        padding-bottom: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .card-header h2 {
+        margin-bottom: 0;
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    /* Student info */
+    .student-name {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #4b5563;
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Email input styling */
+    .email-input-container {
+        margin: 1rem 0;
+        padding: 0.8rem;
+        background-color: #f9fafb;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+    }
+    
+    .email-input-container label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #4b5563;
+    }
+    
+    .email-field {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .form-control {
+        flex: 1;
+        padding: 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        font-size: 1rem;
+    }
+    
+    .form-control:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+    }
+    
+    .email-status {
+        display: block;
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+        height: 1.2rem;
+    }
+    
+    .email-status.error {
+        color: #dc2626;
+    }
+    
+    .email-status.success {
+        color: #10b981;
+    }
+    
+    /* Answer section */
+    .student-answer {
+        background: #f9fafb;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        line-height: 1.6;
+        border-left: 4px solid #3b82f6;
+    }
+    
+    /* Attachments */
+    .file-attachments {
+        margin-top: 1.5rem;
+    }
+    
+    .attachment-list {
+        list-style-type: none;
+        padding: 0;
+    }
+    
+    .attachment-item {
+        background: #f3f4f6;
+        padding: 0.8rem;
+        margin: 0.5rem 0;
+        border-radius: 6px;
+        transition: background-color 0.2s;
+    }
+    
+    .attachment-item:hover {
+        background: #e5e7eb;
+    }
+    
+    .attachment-link {
+        color: #2563eb;
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .attachment-link:hover {
+        text-decoration: underline;
+    }
+    
+    /* Grading results */
+    .grading-results {
+        margin-top: 1.5rem;
+    }
+    
+    #ai-feedback {
+        margin: 1rem 0;
+    }
+    
+    .empty-feedback {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 1rem;
+        background: #f9fafb;
+        border-radius: 8px;
+        text-align: center;
+        color: #6b7280;
+    }
+    
+    .empty-feedback i {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        color: #93c5fd;
+    }
+    
+    /* Feedback sections */
+    .feedback-section, .grade-section, .summary-section, .glow-section, .grow-section, .think-about-it-section, .rubric-section {
+        margin-bottom: 1.5rem;
+        padding: 1.2rem;
+        border-radius: 8px;
+        background: #f9fafb;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border-left: 4px solid #3b82f6;
+    }
+    
+    .feedback-section h4, .grade-section h4, .summary-section h4, .glow-section h4, .grow-section h4, .think-about-it-section h4, .rubric-section h4 {
+        color: #2563eb;
+        margin-bottom: 0.8rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* Section-specific colors */
+    .grade-section { border-left-color: #10b981; }
+    .grade-section h4 { color: #10b981; }
+    
+    .glow-section { border-left-color: #f59e0b; }
+    .glow-section h4 { color: #f59e0b; }
+    
+    .grow-section { border-left-color: #8b5cf6; }
+    .grow-section h4 { color: #8b5cf6; }
+    
+    .think-about-it-section { border-left-color: #ec4899; }
+    .think-about-it-section h4 { color: #ec4899; }
+    
+    .rubric-section { border-left-color: #6366f1; }
+    .rubric-section h4 { color: #6366f1; }
+    
+    .grade {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #10b981;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    
+    /* Rubric */
+    .rubric-section ul {
+        list-style-type: none;
+        padding: 0;
+    }
+    
+    .rubric-section ul li {
+        background: #f3f4f6;
+        margin: 0.8rem 0;
+        padding: 1rem;
+        border-radius: 6px;
+        transition: background-color 0.2s;
+    }
+    
+    .rubric-section ul li:hover {
+        background: #e5e7eb;
+    }
+    
+    .rubric-detail {
+        padding: 0.8rem 0 0 1.2rem;
+        margin-top: 0.5rem;
+        border-left: 3px solid #d1d5db;
+    }
+    
+    .rubric-detail div {
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Error messages */
+    .error {
+        color: #dc2626;
+        font-weight: bold;
+        padding: 1rem;
+        background: #fef2f2;
+        border-radius: 8px;
+        margin: 1rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* Loading spinner */
+    .loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 1rem;
+        background: #f9fafb;
+        border-radius: 8px;
+        text-align: center;
+    }
+    
+    .loading-spinner {
+        margin-top: 1.5rem;
+        width: 40px;
+        height: 40px;
+        border: 4px solid rgba(59, 130, 246, 0.3);
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+    
+    .robot-loading {
+        font-size: 3rem;
+        color: #3b82f6;
+        margin-bottom: 1rem;
+        animation: pulse 1.5s infinite;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+        100% { transform: scale(1); }
+    }
+    
+    /* Buttons */
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+        border-radius: 6px;
+        transition: all 0.2s;
+        cursor: pointer;
+        border: none;
+        font-size: 0.9rem;
+    }
+    
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+    
+    .btn-primary {
+        background-color: #3b82f6;
+        color: white;
+    }
+    
+    .btn-primary:hover:not(:disabled) {
+        background-color: #2563eb;
+    }
+    
+    .btn-success {
+        background-color: #10b981;
+        color: white;
+    }
+    
+    .btn-success:hover:not(:disabled) {
+        background-color: #059669;
+    }
+    
+    .btn-outline-primary {
+        background-color: transparent;
+        color: #3b82f6;
+        border: 1px solid #3b82f6;
+    }
+    
+    .btn-outline-primary:hover {
+        background-color: #3b82f6;
+        color: white;
+    }
+    
+    .btn-secondary {
+        background-color: #6b7280;
+        color: white;
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 992px) {
+        .dashboard-container {
+            grid-template-columns: 1fr;
+        }
+        
+        .side-panel, .main-panel {
+            height: auto;
+        }
+        
+        .card-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .action-buttons {
+            margin-top: 1rem;
+            width: 100%;
+            justify-content: space-between;
+        }
+    }
+    
+    .d-inline {
+        display: inline-block;
+    }
+</style>
+{% endblock %}
