@@ -43,6 +43,21 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        
+        # Create default Bloom's Taxonomy rubric if it doesn't exist
+        from .models import Rubric
+        blooms_rubric = Rubric.query.filter_by(name="Bloom's Taxonomy (Default)", level="Bloom's Taxonomy").first()
+        if not blooms_rubric:
+            default_rubric = Rubric(
+                name="Bloom's Taxonomy (Default)",
+                description="Default rubric based on Bloom's Taxonomy cognitive levels",
+                level="Bloom's Taxonomy",
+                criteria=json.dumps([]),  # Criteria are generated dynamically from get_criteria()
+                creator_id=None  # System-created rubric
+            )
+            db.session.add(default_rubric)
+            db.session.commit()
+            print("Created default Bloom's Taxonomy rubric")
 
     Migrate(app, db)
 

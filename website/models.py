@@ -157,6 +157,50 @@ class Rubric(db.Model):
                     {"rating": "Needs Improvement", "score": 2, "description": "Many errors, lacks clarity."},
                     {"rating": "Poor", "score": 1, "description": "Poor language, difficult to understand."}
                 ]
+            },
+            "Bloom's Taxonomy": {
+                "Remember (Knowledge)": [
+                    {"rating": "Excellent", "score": 5, "description": "Accurately recalls facts, terms, and basic concepts without errors."},
+                    {"rating": "Good", "score": 4, "description": "Recalls most facts and concepts with minor gaps."},
+                    {"rating": "Satisfactory", "score": 3, "description": "Recalls basic information but misses some details."},
+                    {"rating": "Needs Improvement", "score": 2, "description": "Struggles to recall basic facts and concepts."},
+                    {"rating": "Poor", "score": 1, "description": "Unable to recall relevant information."}
+                ],
+                "Understand (Comprehension)": [
+                    {"rating": "Excellent", "score": 5, "description": "Clearly explains ideas and concepts in own words with examples."},
+                    {"rating": "Good", "score": 4, "description": "Explains concepts well with minor clarification needed."},
+                    {"rating": "Satisfactory", "score": 3, "description": "Shows basic understanding but explanation lacks depth."},
+                    {"rating": "Needs Improvement", "score": 2, "description": "Struggles to explain concepts clearly."},
+                    {"rating": "Poor", "score": 1, "description": "Cannot explain or interpret the information."}
+                ],
+                "Apply (Application)": [
+                    {"rating": "Excellent", "score": 5, "description": "Skillfully applies knowledge to new situations and solves problems."},
+                    {"rating": "Good", "score": 4, "description": "Applies concepts correctly with minor errors."},
+                    {"rating": "Satisfactory", "score": 3, "description": "Can apply knowledge in familiar situations only."},
+                    {"rating": "Needs Improvement", "score": 2, "description": "Struggles to apply concepts to new situations."},
+                    {"rating": "Poor", "score": 1, "description": "Cannot apply knowledge appropriately."}
+                ],
+                "Analyze (Analysis)": [
+                    {"rating": "Excellent", "score": 5, "description": "Draws insightful connections, identifies patterns, and distinguishes components."},
+                    {"rating": "Good", "score": 4, "description": "Analyzes information well with good connections."},
+                    {"rating": "Satisfactory", "score": 3, "description": "Shows basic analysis but misses deeper connections."},
+                    {"rating": "Needs Improvement", "score": 2, "description": "Limited analytical thinking, superficial connections."},
+                    {"rating": "Poor", "score": 1, "description": "Cannot break down or analyze information."}
+                ],
+                "Evaluate (Evaluation)": [
+                    {"rating": "Excellent", "score": 5, "description": "Makes well-reasoned judgments with strong evidence and justification."},
+                    {"rating": "Good", "score": 4, "description": "Evaluates with good reasoning and some evidence."},
+                    {"rating": "Satisfactory", "score": 3, "description": "Makes basic judgments but lacks strong justification."},
+                    {"rating": "Needs Improvement", "score": 2, "description": "Weak evaluation with little supporting evidence."},
+                    {"rating": "Poor", "score": 1, "description": "Cannot make or justify judgments."}
+                ],
+                "Create (Synthesis)": [
+                    {"rating": "Excellent", "score": 5, "description": "Produces original, creative work that synthesizes multiple ideas."},
+                    {"rating": "Good", "score": 4, "description": "Creates new work with good originality."},
+                    {"rating": "Satisfactory", "score": 3, "description": "Produces basic new work with limited creativity."},
+                    {"rating": "Needs Improvement", "score": 2, "description": "Struggles to create original work."},
+                    {"rating": "Poor", "score": 1, "description": "Cannot produce new or original work."}
+                ]
             }
         }.get(self.level, {})
 

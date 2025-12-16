@@ -3,7 +3,7 @@ import tempfile
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, session
 from flask_login import login_required, current_user
 from .models import Assignment, Submission, db, Class, Rubric, RubricCriteria, User, GoogleClass, GradingJob, check_resource_access
-import google.generativeai as genai
+from huggingface_hub import InferenceClient
 import re, json, os
 import urllib.parse
 import google.oauth2.credentials
@@ -26,13 +26,13 @@ SCOPES = [
 
 load_dotenv()
 
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
 views = Blueprint('views', __name__)
 
-# Configure Gemini
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash')
+# Configure Hugging Face Inference API with new router endpoint
+client = InferenceClient(token=API_KEY, base_url="https://router.huggingface.co")
+MODEL_NAME = "meta-llama/Llama-3.3-70B-Instruct"
 
 
 def extract_grade(text):
@@ -64,7 +64,10 @@ def home():
 @views.route('/dashboard')
 @login_required
 def dashboard():
-    rubrics = Rubric.query.filter_by(creator_id=current_user.id).limit(3).all()
+    # Get both user-created rubrics and system-created default rubrics (limit to 3 for preview)
+    rubrics = Rubric.query.filter(
+        (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+    ).limit(3).all()
     return render_template('dashboard.html', 
                          user=current_user, 
                          classes=current_user.classes,
@@ -165,57 +168,103 @@ def delete_class(class_id):
 @login_required
 def grade_assignment():
     """
-    API endpoint for grading assignments using Gemini AI.
+    API endpoint for grading assignments using AI with full rubric support.
     """
     data = request.json
     question = data.get("question")
     student_answer = data.get("student_answer")
+    rubric_id = data.get("rubric_id")
     
     # Validate input
     if not question or not student_answer:
         return jsonify({'error': 'Missing required fields'}), 400
     
-    # Construct the grading prompt
+    # Get rubric if provided
+    rubric_criteria = []
+    level = "High School"  # Default level
+    if rubric_id:
+        rubric = Rubric.query.get(rubric_id)
+        if rubric:
+            rubric_criteria = rubric.get_criteria()
+            level = rubric.level
+    
+    # Construct the grading prompt with rubric
     prompt = f"""
     You are an AI teaching assistant. Grade this student answer based on the provided rubric:
     
     Question: {question}
     Student Answer: {student_answer}
     
+    Rubric Criteria for {level} Level:
+    {json.dumps(rubric_criteria, indent=2) if rubric_criteria else "No specific rubric provided"}
+    
     Provide detailed feedback and a numerical grade between 0-100.
-    Format your response as:
-    - Feedback: [detailed feedback]
-    - Grade: [numerical grade]/100
+    Format your response as a JSON object with the following keys:
+    - feedback: [detailed feedback]
+    - grade: [numerical grade as a string in format "X/100"]
+    - summary: [brief summary of the feedback]
+    - glow: [what the student did well]
+    - grow: [areas for improvement]
+    - think_about_it: [questions to ponder for improvement]
+    - rubric: [detailed rubric breakdown with scores and explanations]
+    
+    IMPORTANT GRADING INSTRUCTIONS:
+    1. If the student's answer is completely unrelated to the question, assign 0 marks and provide appropriate feedback.
+    2. If the content appears to be AI-generated, deduct marks appropriately and mention this concern in your feedback.
+    3. Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+    
+    Your entire response must be a valid JSON object that can be directly parsed.
     """
     
     try:
-        # Get AI response
-        response = model.generate_content(prompt)
-        feedback = response.text
+        # Get AI response from Hugging Face
+        response = client.chat_completion(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        response_text = response.choices[0].message.content
         
-        # Extract grade from feedback
-        grade = extract_grade(feedback)
-        if grade is None:
-            return jsonify({'error': 'Could not extract grade from AI response'}), 500
+        # Process the response to extract clean JSON
+        processed_text = clean_ai_response(response_text)
         
-        # Save submission to database (optional)
-        if 'assignment_id' in data and 'student_id' in data:
-            submission = Submission(
-                student_answer=data['answer'],
-                ai_feedback=feedback,
-                grade=grade,
-                assignment_id=data['assignment_id'],
-                student_id=data['student_id']
-            )
-            db.session.add(submission)
-            db.session.commit()
-        
-        return jsonify({
-            'feedback': feedback,
-            'grade': grade
-        })
+        try:
+            feedback_data = json.loads(processed_text)
+            
+            # Ensure grade is properly formatted
+            if isinstance(feedback_data.get('grade'), str):
+                if '/' not in feedback_data['grade']:
+                    feedback_data['grade'] = f"{feedback_data['grade']}/100"
+            elif isinstance(feedback_data.get('grade'), (int, float)):
+                feedback_data['grade'] = f"{feedback_data['grade']}/100"
+            
+            # Ensure all expected keys are present
+            required_keys = ['feedback', 'grade', 'summary', 'glow', 'grow', 'think_about_it', 'rubric']
+            for key in required_keys:
+                if key not in feedback_data:
+                    feedback_data[key] = {"rubric": {"Overall": "Assessment included in general feedback."}}[key] if key == 'rubric' else "Not provided in AI response."
+            
+            return jsonify(feedback_data)
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error: {str(e)}")
+            print(f"Attempted to parse: {processed_text}")
+            
+            # Fallback to basic response
+            feedback_data = {
+                'feedback': response_text,
+                'grade': extract_grade(response_text) or "70/100",
+                'summary': "AI provided feedback but not in the expected format.",
+                'glow': extract_section(response_text, "glow", "positive points", "strengths"),
+                'grow': extract_section(response_text, "grow", "improve", "weaknesses"),
+                'think_about_it': extract_section(response_text, "think", "consider", "reflect"),
+                'rubric': {"Overall": "See feedback for assessment details."}
+            }
+            return jsonify(feedback_data)
     
     except Exception as e:
+        print(f"Error in grade_assignment: {str(e)}")
         return jsonify({'error': str(e)}), 500
     
     # website/views.py
@@ -383,7 +432,10 @@ def delete_submission(submission_id):
 @views.route('/rubrics')
 @login_required
 def view_rubrics():
-    rubrics = Rubric.query.filter_by(creator_id=current_user.id).all()
+    # Get both user-created rubrics and system-created default rubrics
+    rubrics = Rubric.query.filter(
+        (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+    ).all()
     return render_template('rubrics.html', rubrics=rubrics)
 
     
@@ -445,12 +497,18 @@ def deepgrade(submission_id):
                 """
 
                 try:
-                    # Get AI response
-                    response = model.generate_content(prompt)
-                    print("AI Response:", response.text)  # Log the AI response
+                    # Get AI response from Hugging Face
+                    response = client.chat_completion(
+                        model=MODEL_NAME,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=2000,
+                        temperature=0.7
+                    )
+                    response_text = response.choices[0].message.content
+                    print("AI Response:", response_text)  # Log the AI response
 
                     # Process the response to extract clean JSON
-                    processed_text = clean_ai_response(response.text)
+                    processed_text = clean_ai_response(response_text)
                     print("Processed Text:", processed_text)  # Debug output
 
                     try:
@@ -474,12 +532,12 @@ def deepgrade(submission_id):
                         print(f"Attempted to parse: {processed_text}")
 
                         feedback_data = {
-                            'feedback': response.text,
-                            'grade': extract_grade(response.text) or "70/100",
+                            'feedback': response_text,
+                            'grade': extract_grade(response_text) or "70/100",
                             'summary': "AI provided feedback but not in the expected format.",
-                            'glow': extract_section(response.text, "glow", "positive points", "strengths"),
-                            'grow': extract_section(response.text, "grow", "improve", "weaknesses"),
-                            'think_about_it': extract_section(response.text, "think", "consider", "reflect"),
+                            'glow': extract_section(response_text, "glow", "positive points", "strengths"),
+                            'grow': extract_section(response_text, "grow", "improve", "weaknesses"),
+                            'think_about_it': extract_section(response_text, "think", "consider", "reflect"),
                             'rubric': {"Overall": "See feedback for assessment details."}
                         }
 
@@ -494,7 +552,7 @@ def deepgrade(submission_id):
                         elif isinstance(feedback_data['grade'], (int, float)):
                             grade_value = float(feedback_data['grade'])
                     except (KeyError, ValueError, TypeError):
-                        extracted = extract_grade(response.text)
+                        extracted = extract_grade(response_text)
                         grade_value = extracted if extracted is not None else 70
 
                     submission.grade = grade_value
@@ -729,9 +787,15 @@ def evaluate_with_rubric(question, answer, criteria, school_level):
     
     try:
         print("DEBUG - Sending prompt to model")
-        response = model.generate_content(prompt)
-        print(f"DEBUG - Received response: {response.text[:100]}...")
-        return response.text
+        response = client.chat_completion(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        response_text = response.choices[0].message.content
+        print(f"DEBUG - Received response: {response_text[:100]}...")
+        return response_text
     except Exception as e:
         print(f"DEBUG - AI evaluation error: {str(e)}")
         raise RuntimeError(f"AI evaluation failed: {str(e)}")
@@ -1540,9 +1604,14 @@ def select_rubric(class_id):
         service = googleapiclient.discovery.build('classroom', 'v1', credentials=credentials)
         gc_class = service.courses().get(id=class_id).execute()
         
+        # Get both user-created rubrics and system-created default rubrics
+        all_rubrics = Rubric.query.filter(
+            (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+        ).all()
+        
         return render_template('select_rubric.html',
             class_name=gc_class['name'],
-            rubrics=current_user.rubrics)
+            rubrics=all_rubrics)
     except Exception as e:
         flash(f'Error accessing Google Classroom: {str(e)}', 'error')
         return redirect(url_for('views.dashboard'))
