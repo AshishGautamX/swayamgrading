@@ -164,6 +164,58 @@ def delete_class(class_id):
         return redirect(url_for('views.dashboard'))
 
 
+@views.route('/extract-pdf-text', methods=['POST'])
+@login_required
+def extract_pdf_text():
+    """
+    Extract text from uploaded PDF files using PyPDF2.
+    """
+    try:
+        from PyPDF2 import PdfReader
+        import io
+        
+        if 'pdf_file' not in request.files:
+            return jsonify({'error': 'No PDF file provided'}), 400
+        
+        pdf_file = request.files['pdf_file']
+        
+        if pdf_file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not pdf_file.filename.lower().endswith('.pdf'):
+            return jsonify({'error': 'File must be a PDF'}), 400
+        
+        # Read PDF file
+        pdf_bytes = pdf_file.read()
+        pdf_stream = io.BytesIO(pdf_bytes)
+        
+        # Extract text using PyPDF2
+        pdf_reader = PdfReader(pdf_stream)
+        extracted_text = ''
+        
+        for page_num, page in enumerate(pdf_reader.pages):
+            try:
+                page_text = page.extract_text()
+                if page_text:
+                    extracted_text += page_text + '\n\n'
+            except Exception as e:
+                print(f"Error extracting text from page {page_num + 1}: {str(e)}")
+                continue
+        
+        if not extracted_text.strip():
+            return jsonify({'error': 'No text could be extracted from the PDF'}), 400
+        
+        return jsonify({
+            'success': True,
+            'text': extracted_text.strip(),
+            'pages': len(pdf_reader.pages)
+        })
+    
+    except Exception as e:
+        print(f"PDF extraction error: {str(e)}")
+        return jsonify({'error': f'Failed to extract text: {str(e)}'}), 500
+
+
 @views.route('/grade', methods=['POST'])
 @login_required
 def grade_assignment():
@@ -333,8 +385,11 @@ def create_assignment(class_id):
         flash('Assignment created successfully!', category='success')
         return redirect(url_for('views.view_class', class_id=class_id))
     
-    # If GET request, render the form
-    return render_template('create_assignment.html', cls=cls)
+    # If GET request, render the form with rubrics
+    rubrics = Rubric.query.filter(
+        (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+    ).all()
+    return render_template('create_assignment.html', cls=cls, rubrics=rubrics)
 
 
 @views.route('/create-rubric', methods=['GET', 'POST'])
