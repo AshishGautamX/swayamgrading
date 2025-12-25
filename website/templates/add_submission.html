@@ -10,6 +10,7 @@
             <p class="question">{{ assignment.question }}</p>
         </div>
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <div class="form-group">
                 <label><i class="fas fa-user-graduate"></i> Student Name</label>
                 <input type="text" name="student_name" required>

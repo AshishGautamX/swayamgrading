@@ -2,7 +2,6 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash
 from flask_login import login_required, current_user
 from .models import Assignment, Submission, db, Class, RubricCriteria, Rubric
-import google.generativeai as genai
 import re
 
 

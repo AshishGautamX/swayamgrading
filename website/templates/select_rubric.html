@@ -5,6 +5,7 @@
     <div class="main-panel">
         <h2>Select Rubric for {{ class_name }}</h2>
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <input type="hidden" name="class_name" value="{{ class_name }}">
             <div class="form-group">
                 <select name="rubric_id" required>

@@ -3,124 +3,130 @@
 {% block content %}
 <div class="home-container">
     <div class="hero-section">
-        <h1>Welcome to Swayam</h1>
+        <h1>Welcome to AIGrader</h1>
         <p class="tagline">Intelligent grading that saves time, improves feedback</p>
         <p class="sub-tagline">Empower your teaching with AI-assisted assessment</p>
         <div class="cta-buttons">
             {% if not current_user.is_authenticated %}
-                <a href="{{ url_for('auth.google_login') }}" class="btn btn-primary btn-lg">
-                    <i class="fas fa-sign-in-alt"></i> Get Started with Google
-                </a>
+            <a href="{{ url_for('auth.google_login') }}" class="btn btn-primary btn-lg">
+                <i class="fas fa-sign-in-alt"></i> Get Started with Google
+            </a>
             {% else %}
-                <a href="{{ url_for('views.dashboard') }}" class="btn btn-primary btn-lg">
-                    <i class="fas fa-tachometer-alt"></i> Go to Dashboard
-                </a>
+            <a href="{{ url_for('views.dashboard') }}" class="btn btn-primary btn-lg">
+                <i class="fas fa-tachometer-alt"></i> Go to Dashboard
+            </a>
             {% endif %}
         </div>
     </div>
-    
+
     <div class="wave-divider">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 100">
-            <path fill="var(--background)" fill-opacity="1" d="M0,64L80,69.3C160,75,320,85,480,80C640,75,800,53,960,48C1120,43,1280,53,1360,58.7L1440,64L1440,100L1360,100C1280,100,1120,100,960,100C800,100,640,100,480,100C320,100,160,100,80,100L0,100Z"></path>
+            <path fill="var(--background)" fill-opacity="1"
+                d="M0,64L80,69.3C160,75,320,85,480,80C640,75,800,53,960,48C1120,43,1280,53,1360,58.7L1440,64L1440,100L1360,100C1280,100,1120,100,960,100C800,100,640,100,480,100C320,100,160,100,80,100L0,100Z">
+            </path>
         </svg>
     </div>
-    
+
     <h2 class="section-title">Powerful Features to Transform Your Grading Process</h2>
-    
+
     <div class="features-section">
         <div class="feature-card">
             <i class="fas fa-robot fa-3x"></i>
             <h3>AI-Powered Grading</h3>
-            <p>Our advanced AI engine analyzes student submissions with human-like understanding, providing consistent and objective grading at scale.</p>
+            <p>Our advanced AI engine analyzes student submissions with human-like understanding, providing consistent
+                and objective grading at scale.</p>
         </div>
-        
+
         <div class="feature-card">
             <i class="fas fa-clipboard-list fa-3x"></i>
             <h3>Custom Rubrics</h3>
-            <p>Create detailed, personalized rubrics tailored to your specific assessment needs. Ensure grading consistency across all assignments.</p>
+            <p>Create detailed, personalized rubrics tailored to your specific assessment needs. Ensure grading
+                consistency across all assignments.</p>
         </div>
-        
+
         <div class="feature-card">
             <i class="fas fa-chalkboard-teacher fa-3x"></i>
             <h3>Google Classroom Integration</h3>
-            <p>Seamlessly import your classes and assignments from Google Classroom. Our system automatically processes submissions and generates grades, saving you hours of manual work.</p>
+            <p>Seamlessly import your classes and assignments from Google Classroom. Our system automatically processes
+                submissions and generates grades, saving you hours of manual work.</p>
         </div>
-        
+
         <div class="feature-card">
             <i class="fas fa-envelope-open-text fa-3x"></i>
             <h3>Detailed Feedback Emails</h3>
-            <p>Send comprehensive, personalized feedback directly to students via email. Help them understand their strengths and areas for improvement with AI-generated insights.</p>
+            <p>Send comprehensive, personalized feedback directly to students via email. Help them understand their
+                strengths and areas for improvement with AI-generated insights.</p>
         </div>
     </div>
-    
+
 </div>
 
 <style>
     :root {
         --background: #f8f9fa;
     }
-    
+
     .home-container {
         max-width: 1200px;
         margin: 0 auto;
         padding: 2rem;
     }
-    
+
     .hero-section {
         text-align: center;
         padding: 5rem 0 3rem;
-        background: linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.9) 100%);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.9) 100%);
         border-radius: 16px;
         margin-bottom: 1rem;
     }
-    
+
     .hero-section h1 {
         font-size: 3.5rem;
         color: var(--tertiary);
         margin-bottom: 1rem;
         font-weight: 700;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
-    
+
     .tagline {
         font-size: 1.5rem;
         color: #555;
         margin-bottom: 1rem;
         font-weight: 500;
     }
-    
+
     .sub-tagline {
         font-size: 1.2rem;
         color: #666;
         margin-bottom: 2.5rem;
         font-weight: 400;
     }
-    
+
     .cta-buttons {
         display: flex;
         justify-content: center;
     }
-    
+
     .btn-lg {
         padding: 0.8rem 2rem;
         font-size: 1.1rem;
         font-weight: 500;
         border-radius: 50px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         transition: all 0.3s ease;
     }
-    
+
     .btn-lg:hover {
         transform: translateY(-3px);
-        box-shadow: 0 6px 15px rgba(0,0,0,0.2);
+        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
     }
-    
+
     .wave-divider {
         margin: 2rem 0;
         display: block;
         width: 100%;
     }
-    
+
     .section-title {
         text-align: center;
         font-size: 2rem;
@@ -128,69 +134,69 @@
         margin-bottom: 3rem;
         font-weight: 600;
     }
-    
+
     .features-section {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         gap: 2rem;
         margin-bottom: 4rem;
     }
-    
+
     .feature-card {
         background: white;
         border-radius: 16px;
         padding: 2.5rem 2rem;
         text-align: center;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05);
         transition: all 0.3s ease;
-        border: 1px solid rgba(0,0,0,0.05);
+        border: 1px solid rgba(0, 0, 0, 0.05);
         height: 100%;
         display: flex;
         flex-direction: column;
         align-items: center;
     }
-    
+
     .feature-card:hover {
         transform: translateY(-10px);
-        box-shadow: 0 15px 30px rgba(0,0,0,0.1);
+        box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1);
         border-color: rgba(var(--interactive-rgb), 0.2);
     }
-    
+
     .feature-card i {
         color: var(--interactive);
         margin-bottom: 1.5rem;
     }
-    
+
     .feature-card h3 {
         color: var(--tertiary);
         margin-bottom: 1rem;
         font-weight: 600;
         font-size: 1.4rem;
     }
-    
+
     .feature-card p {
         color: #666;
         line-height: 1.6;
         flex-grow: 1;
     }
-    
+
     @media (max-width: 768px) {
         .hero-section h1 {
             font-size: 2.5rem;
         }
-        
+
         .tagline {
             font-size: 1.2rem;
         }
-        
+
         .sub-tagline {
             font-size: 1rem;
         }
-        
+
         .features-section {
             grid-template-columns: 1fr;
         }
-        
+
         .feature-card {
             padding: 2rem 1.5rem;
         }

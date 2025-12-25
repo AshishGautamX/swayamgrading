@@ -1,9 +1,11 @@
 from dotenv import load_dotenv
 import tempfile
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, session
+import logging
+import html
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_login import login_required, current_user
 from .models import Assignment, Submission, db, Class, Rubric, RubricCriteria, User, GoogleClass, GradingJob, check_resource_access
-import google.generativeai as genai
+from huggingface_hub import InferenceClient
 import re, json, os
 import urllib.parse
 import google.oauth2.credentials
@@ -12,6 +14,8 @@ import googleapiclient.discovery
 import google.cloud
 from threading import Thread
 
+# Configure logging
+logger = logging.getLogger(__name__)
 
 SCOPES = [
     'https://www.googleapis.com/auth/classroom.courses.readonly',
@@ -26,13 +30,54 @@ SCOPES = [
 
 load_dotenv()
 
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
 views = Blueprint('views', __name__)
 
-# Configure Gemini
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash')
+# Configure Hugging Face Inference API with new router endpoint
+client = InferenceClient(token=API_KEY, base_url="https://router.huggingface.co")
+MODEL_NAME = os.getenv("AI_MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+
+# ================== INPUT VALIDATION UTILITIES ==================
+
+def sanitize_input(text, max_length=10000):
+    """Sanitize user input to prevent XSS and limit length."""
+    if text is None:
+        return None
+    # Convert to string and strip
+    text = str(text).strip()
+    # Limit length
+    if len(text) > max_length:
+        text = text[:max_length]
+    # HTML escape to prevent XSS
+    return html.escape(text)
+
+def validate_class_name(name):
+    """Validate class name."""
+    if not name or len(name.strip()) < 1:
+        return False, "Class name is required"
+    if len(name) > 150:
+        return False, "Class name must be less than 150 characters"
+    return True, sanitize_input(name)
+
+def validate_email(email):
+    """Validate email format."""
+    if not email:
+        return False, "Email is required"
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        return False, "Invalid email format"
+    if len(email) > 150:
+        return False, "Email must be less than 150 characters"
+    return True, email.lower().strip()
+
+def validate_text_field(text, field_name, max_length=10000, required=True):
+    """Validate a text field."""
+    if required and (not text or len(text.strip()) < 1):
+        return False, f"{field_name} is required"
+    if text and len(text) > max_length:
+        return False, f"{field_name} must be less than {max_length} characters"
+    return True, sanitize_input(text) if text else None
 
 
 def extract_grade(text):
@@ -64,7 +109,10 @@ def home():
 @views.route('/dashboard')
 @login_required
 def dashboard():
-    rubrics = Rubric.query.filter_by(creator_id=current_user.id).limit(3).all()
+    # Get both user-created rubrics and system-created default rubrics (limit to 3 for preview)
+    rubrics = Rubric.query.filter(
+        (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+    ).limit(3).all()
     return render_template('dashboard.html', 
                          user=current_user, 
                          classes=current_user.classes,
@@ -126,6 +174,12 @@ def view_class(class_id):
     cls = Class.query.options(
         db.joinedload(Class.assignments).joinedload(Assignment.submissions)
     ).get_or_404(class_id)
+    
+    # Security: Check if user owns this class
+    if not check_resource_access(cls):
+        flash('You do not have permission to view this class!', category='error')
+        return redirect(url_for('views.dashboard'))
+    
     return render_template("class.html", user=current_user, cls=cls, assignments=cls.assignments)
 
 @views.route('/delete-class/<int:class_id>', methods=['POST'])
@@ -161,61 +215,159 @@ def delete_class(class_id):
         return redirect(url_for('views.dashboard'))
 
 
+@views.route('/extract-pdf-text', methods=['POST'])
+@login_required
+def extract_pdf_text():
+    """
+    Extract text from uploaded PDF files using PyPDF2.
+    """
+    try:
+        from PyPDF2 import PdfReader
+        import io
+        
+        if 'pdf_file' not in request.files:
+            return jsonify({'error': 'No PDF file provided'}), 400
+        
+        pdf_file = request.files['pdf_file']
+        
+        if pdf_file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not pdf_file.filename.lower().endswith('.pdf'):
+            return jsonify({'error': 'File must be a PDF'}), 400
+        
+        # Read PDF file
+        pdf_bytes = pdf_file.read()
+        pdf_stream = io.BytesIO(pdf_bytes)
+        
+        # Extract text using PyPDF2
+        pdf_reader = PdfReader(pdf_stream)
+        extracted_text = ''
+        
+        for page_num, page in enumerate(pdf_reader.pages):
+            try:
+                page_text = page.extract_text()
+                if page_text:
+                    extracted_text += page_text + '\n\n'
+            except Exception as e:
+                print(f"Error extracting text from page {page_num + 1}: {str(e)}")
+                continue
+        
+        if not extracted_text.strip():
+            return jsonify({'error': 'No text could be extracted from the PDF'}), 400
+        
+        return jsonify({
+            'success': True,
+            'text': extracted_text.strip(),
+            'pages': len(pdf_reader.pages)
+        })
+    
+    except Exception as e:
+        print(f"PDF extraction error: {str(e)}")
+        return jsonify({'error': f'Failed to extract text: {str(e)}'}), 500
+
+
 @views.route('/grade', methods=['POST'])
 @login_required
 def grade_assignment():
     """
-    API endpoint for grading assignments using Gemini AI.
+    API endpoint for grading assignments using AI with full rubric support.
     """
     data = request.json
     question = data.get("question")
     student_answer = data.get("student_answer")
+    rubric_id = data.get("rubric_id")
     
     # Validate input
     if not question or not student_answer:
         return jsonify({'error': 'Missing required fields'}), 400
     
-    # Construct the grading prompt
+    # Get rubric if provided
+    rubric_criteria = []
+    level = "High School"  # Default level
+    if rubric_id:
+        rubric = Rubric.query.get(rubric_id)
+        if rubric:
+            rubric_criteria = rubric.get_criteria()
+            level = rubric.level
+    
+    # Construct the grading prompt with rubric
     prompt = f"""
     You are an AI teaching assistant. Grade this student answer based on the provided rubric:
     
     Question: {question}
     Student Answer: {student_answer}
     
+    Rubric Criteria for {level} Level:
+    {json.dumps(rubric_criteria, indent=2) if rubric_criteria else "No specific rubric provided"}
+    
     Provide detailed feedback and a numerical grade between 0-100.
-    Format your response as:
-    - Feedback: [detailed feedback]
-    - Grade: [numerical grade]/100
+    Format your response as a JSON object with the following keys:
+    - feedback: [detailed feedback]
+    - grade: [numerical grade as a string in format "X/100"]
+    - summary: [brief summary of the feedback]
+    - glow: [what the student did well]
+    - grow: [areas for improvement]
+    - think_about_it: [questions to ponder for improvement]
+    - rubric: [detailed rubric breakdown with scores and explanations]
+    
+    IMPORTANT GRADING INSTRUCTIONS:
+    1. If the student's answer is completely unrelated to the question, assign 0 marks and provide appropriate feedback.
+    2. If the content appears to be AI-generated, deduct marks appropriately and mention this concern in your feedback.
+    3. Return ONLY the JSON object with no markdown formatting, no backticks, and no code blocks.
+    
+    Your entire response must be a valid JSON object that can be directly parsed.
     """
     
     try:
-        # Get AI response
-        response = model.generate_content(prompt)
-        feedback = response.text
+        # Get AI response from Hugging Face
+        response = client.chat_completion(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        response_text = response.choices[0].message.content
         
-        # Extract grade from feedback
-        grade = extract_grade(feedback)
-        if grade is None:
-            return jsonify({'error': 'Could not extract grade from AI response'}), 500
+        # Process the response to extract clean JSON
+        processed_text = clean_ai_response(response_text)
         
-        # Save submission to database (optional)
-        if 'assignment_id' in data and 'student_id' in data:
-            submission = Submission(
-                student_answer=data['answer'],
-                ai_feedback=feedback,
-                grade=grade,
-                assignment_id=data['assignment_id'],
-                student_id=data['student_id']
-            )
-            db.session.add(submission)
-            db.session.commit()
-        
-        return jsonify({
-            'feedback': feedback,
-            'grade': grade
-        })
+        try:
+            feedback_data = json.loads(processed_text)
+            
+            # Ensure grade is properly formatted
+            if isinstance(feedback_data.get('grade'), str):
+                if '/' not in feedback_data['grade']:
+                    feedback_data['grade'] = f"{feedback_data['grade']}/100"
+            elif isinstance(feedback_data.get('grade'), (int, float)):
+                feedback_data['grade'] = f"{feedback_data['grade']}/100"
+            
+            # Ensure all expected keys are present
+            required_keys = ['feedback', 'grade', 'summary', 'glow', 'grow', 'think_about_it', 'rubric']
+            for key in required_keys:
+                if key not in feedback_data:
+                    feedback_data[key] = {"rubric": {"Overall": "Assessment included in general feedback."}}[key] if key == 'rubric' else "Not provided in AI response."
+            
+            return jsonify(feedback_data)
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error: {str(e)}")
+            print(f"Attempted to parse: {processed_text}")
+            
+            # Fallback to basic response
+            feedback_data = {
+                'feedback': response_text,
+                'grade': extract_grade(response_text) or "70/100",
+                'summary': "AI provided feedback but not in the expected format.",
+                'glow': extract_section(response_text, "glow", "positive points", "strengths"),
+                'grow': extract_section(response_text, "grow", "improve", "weaknesses"),
+                'think_about_it': extract_section(response_text, "think", "consider", "reflect"),
+                'rubric': {"Overall": "See feedback for assessment details."}
+            }
+            return jsonify(feedback_data)
     
     except Exception as e:
+        logger.error(f"Error in grade_assignment: {str(e)}")
         return jsonify({'error': str(e)}), 500
     
     # website/views.py
@@ -227,14 +379,34 @@ def grade_assignment():
 def add_submission(assignment_id):
     assignment = Assignment.query.get_or_404(assignment_id)
     
+    # Security: Check if user owns the class this assignment belongs to
+    if not check_resource_access(assignment.class_ref):
+        flash('You do not have permission to add submissions to this assignment!', category='error')
+        return redirect(url_for('views.dashboard'))
+    
     if request.method == 'POST':
         student_name = request.form.get('student_name')
         student_email = request.form.get('student_email')
         student_answer = request.form.get('student_answer')
         
-        if not student_name or not student_email or not student_answer:
-            flash('Student name, email, and answer are required!', category='error')
+        # Input validation
+        valid, result = validate_text_field(student_name, 'Student name', max_length=150)
+        if not valid:
+            flash(result, category='error')
             return redirect(url_for('views.view_class', class_id=assignment.class_id))
+        student_name = result
+        
+        valid, result = validate_email(student_email)
+        if not valid:
+            flash(result, category='error')
+            return redirect(url_for('views.view_class', class_id=assignment.class_id))
+        student_email = result
+        
+        valid, result = validate_text_field(student_answer, 'Student answer')
+        if not valid:
+            flash(result, category='error')
+            return redirect(url_for('views.view_class', class_id=assignment.class_id))
+        student_answer = result
         
         # Create new submission
         new_submission = Submission(
@@ -261,14 +433,28 @@ def add_submission(assignment_id):
 def create_assignment(class_id):
     cls = Class.query.get_or_404(class_id)
     
+    # Security: Check if user owns this class
+    if not check_resource_access(cls):
+        flash('You do not have permission to create assignments for this class!', category='error')
+        return redirect(url_for('views.dashboard'))
+    
     if request.method == 'POST':
         name = request.form.get('name')
         question = request.form.get('question')
         rubric_id = request.form.get('rubric_id')
         
-        if not name or not question:
-            flash('Assignment name and question are required!', category='error')
+        # Input validation
+        valid, result = validate_text_field(name, 'Assignment name', max_length=150)
+        if not valid:
+            flash(result, category='error')
             return redirect(url_for('views.create_assignment', class_id=class_id))
+        name = result
+        
+        valid, result = validate_text_field(question, 'Question')
+        if not valid:
+            flash(result, category='error')
+            return redirect(url_for('views.create_assignment', class_id=class_id))
+        question = result
         
         # Create new assignment
         new_assignment = Assignment(
@@ -284,8 +470,11 @@ def create_assignment(class_id):
         flash('Assignment created successfully!', category='success')
         return redirect(url_for('views.view_class', class_id=class_id))
     
-    # If GET request, render the form
-    return render_template('create_assignment.html', cls=cls)
+    # If GET request, render the form with rubrics
+    rubrics = Rubric.query.filter(
+        (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+    ).all()
+    return render_template('create_assignment.html', cls=cls, rubrics=rubrics)
 
 
 @views.route('/create-rubric', methods=['GET', 'POST'])
@@ -383,7 +572,10 @@ def delete_submission(submission_id):
 @views.route('/rubrics')
 @login_required
 def view_rubrics():
-    rubrics = Rubric.query.filter_by(creator_id=current_user.id).all()
+    # Get both user-created rubrics and system-created default rubrics
+    rubrics = Rubric.query.filter(
+        (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+    ).all()
     return render_template('rubrics.html', rubrics=rubrics)
 
     
@@ -445,12 +637,18 @@ def deepgrade(submission_id):
                 """
 
                 try:
-                    # Get AI response
-                    response = model.generate_content(prompt)
-                    print("AI Response:", response.text)  # Log the AI response
+                    # Get AI response from Hugging Face
+                    response = client.chat_completion(
+                        model=MODEL_NAME,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=2000,
+                        temperature=0.7
+                    )
+                    response_text = response.choices[0].message.content
+                    print("AI Response:", response_text)  # Log the AI response
 
                     # Process the response to extract clean JSON
-                    processed_text = clean_ai_response(response.text)
+                    processed_text = clean_ai_response(response_text)
                     print("Processed Text:", processed_text)  # Debug output
 
                     try:
@@ -474,12 +672,12 @@ def deepgrade(submission_id):
                         print(f"Attempted to parse: {processed_text}")
 
                         feedback_data = {
-                            'feedback': response.text,
-                            'grade': extract_grade(response.text) or "70/100",
+                            'feedback': response_text,
+                            'grade': extract_grade(response_text) or "70/100",
                             'summary': "AI provided feedback but not in the expected format.",
-                            'glow': extract_section(response.text, "glow", "positive points", "strengths"),
-                            'grow': extract_section(response.text, "grow", "improve", "weaknesses"),
-                            'think_about_it': extract_section(response.text, "think", "consider", "reflect"),
+                            'glow': extract_section(response_text, "glow", "positive points", "strengths"),
+                            'grow': extract_section(response_text, "grow", "improve", "weaknesses"),
+                            'think_about_it': extract_section(response_text, "think", "consider", "reflect"),
                             'rubric': {"Overall": "See feedback for assessment details."}
                         }
 
@@ -494,7 +692,7 @@ def deepgrade(submission_id):
                         elif isinstance(feedback_data['grade'], (int, float)):
                             grade_value = float(feedback_data['grade'])
                     except (KeyError, ValueError, TypeError):
-                        extracted = extract_grade(response.text)
+                        extracted = extract_grade(response_text)
                         grade_value = extracted if extracted is not None else 70
 
                     submission.grade = grade_value
@@ -729,9 +927,15 @@ def evaluate_with_rubric(question, answer, criteria, school_level):
     
     try:
         print("DEBUG - Sending prompt to model")
-        response = model.generate_content(prompt)
-        print(f"DEBUG - Received response: {response.text[:100]}...")
-        return response.text
+        response = client.chat_completion(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        response_text = response.choices[0].message.content
+        print(f"DEBUG - Received response: {response_text[:100]}...")
+        return response_text
     except Exception as e:
         print(f"DEBUG - AI evaluation error: {str(e)}")
         raise RuntimeError(f"AI evaluation failed: {str(e)}")
@@ -1377,10 +1581,11 @@ def oauth2callback():
 
 def get_google_credentials():
     """
-    Helper function to get refreshed Google credentials
+    Helper function to get refreshed Google credentials.
+    Returns None if credentials are not available or refresh fails.
     """
     if not current_user.google_tokens:
-        print("No Google tokens found for user")
+        logger.warning("No Google tokens found for user")
         return None
     
     try:
@@ -1391,8 +1596,7 @@ def get_google_credentials():
         missing_fields = [field for field in required_fields if field not in token_data or not token_data[field]]
         
         if missing_fields:
-            print(f"Missing required fields for token refresh: {', '.join(missing_fields)}")
-            print(f"Available token data keys: {list(token_data.keys())}")
+            logger.warning(f"Missing required fields for token refresh: {', '.join(missing_fields)}")
             # Re-authentication needed
             return None
         
@@ -1407,9 +1611,10 @@ def get_google_credentials():
         
         # Force refresh if token is expired
         if not credentials.valid:
-            print("Token expired, attempting to refresh")
-            request = google.auth.transport.requests.Request()
-            credentials.refresh(request)
+            logger.info("Token expired, attempting to refresh")
+            import google.auth.transport.requests
+            auth_request = google.auth.transport.requests.Request()
+            credentials.refresh(auth_request)
             
             # Update stored token
             current_user.google_tokens = json.dumps({
@@ -1421,69 +1626,13 @@ def get_google_credentials():
                 'scopes': credentials.scopes
             })
             db.session.commit()
-            print("Token refreshed successfully")
+            logger.info("Token refreshed successfully")
         
         return credentials
     except Exception as e:
-        print(f"Error refreshing credentials: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error refreshing credentials: {str(e)}")
         return None
 
-def get_google_credentials():
-    """
-    Helper function to get refreshed Google credentials
-    """
-    if not current_user.google_tokens:
-        print("No Google tokens found for user")
-        return None
-    
-    try:
-        token_data = json.loads(current_user.google_tokens)
-        
-        # Check if we have all required fields for refreshing
-        required_fields = ['refresh_token', 'token_uri', 'client_id', 'client_secret']
-        missing_fields = [field for field in required_fields if field not in token_data or not token_data[field]]
-        
-        if missing_fields:
-            print(f"Missing required fields for token refresh: {', '.join(missing_fields)}")
-            print(f"Available token data keys: {list(token_data.keys())}")
-            # Re-authentication needed
-            return None
-        
-        credentials = google.oauth2.credentials.Credentials(
-            token=token_data.get('token'),
-            refresh_token=token_data.get('refresh_token'),
-            token_uri=token_data.get('token_uri'),
-            client_id=token_data.get('client_id'),
-            client_secret=token_data.get('client_secret'),
-            scopes=token_data.get('scopes')
-        )
-        
-        # Force refresh if token is expired
-        if not credentials.valid:
-            print("Token expired, attempting to refresh")
-            request = google.auth.transport.requests.Request()
-            credentials.refresh(request)
-            
-            # Update stored token
-            current_user.google_tokens = json.dumps({
-                'token': credentials.token,
-                'refresh_token': credentials.refresh_token,
-                'token_uri': credentials.token_uri,
-                'client_id': credentials.client_id,
-                'client_secret': credentials.client_secret,
-                'scopes': credentials.scopes
-            })
-            db.session.commit()
-            print("Token refreshed successfully")
-        
-        return credentials
-    except Exception as e:
-        print(f"Error refreshing credentials: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
 
 @views.route('/select-google-class', endpoint='select_google_class', methods=['GET', 'POST'])
 @login_required
@@ -1540,9 +1689,14 @@ def select_rubric(class_id):
         service = googleapiclient.discovery.build('classroom', 'v1', credentials=credentials)
         gc_class = service.courses().get(id=class_id).execute()
         
+        # Get both user-created rubrics and system-created default rubrics
+        all_rubrics = Rubric.query.filter(
+            (Rubric.creator_id == current_user.id) | (Rubric.creator_id == None)
+        ).all()
+        
         return render_template('select_rubric.html',
             class_name=gc_class['name'],
-            rubrics=current_user.rubrics)
+            rubrics=all_rubrics)
     except Exception as e:
         flash(f'Error accessing Google Classroom: {str(e)}', 'error')
         return redirect(url_for('views.dashboard'))
@@ -2126,18 +2280,35 @@ def check_submission_data_column():
 
 
 @views.route('/update-student-email/<submission_id>', methods=['POST'])
+@login_required
 def update_student_email(submission_id):
+    """Update a student's email for a submission."""
     try:
+        submission = Submission.query.get_or_404(submission_id)
+        
+        # Security: Check if user owns the class this submission belongs to
+        if not check_resource_access(submission.assignment_ref.class_ref):
+            return jsonify({'error': 'Permission denied'}), 403
+        
         data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
         email = data.get('email')
         
+        # Validate email
+        valid, result = validate_email(email)
+        if not valid:
+            return jsonify({'error': result}), 400
+        
         # Update the submission with the new email
-        submission = Submission.query.get(submission_id)
-        submission.student_email = email
+        submission.student_email = result
         db.session.commit()
         
+        logger.info(f"User {current_user.id} updated email for submission {submission_id}")
         return jsonify({'success': True, 'message': 'Email updated successfully'})
     except Exception as e:
+        logger.error(f"Error updating student email: {str(e)}")
         return jsonify({'error': str(e)}), 400
     
 @views.route('/get-extracted-text/<int:submission_id>/<file_id>', endpoint='get_extracted_text')

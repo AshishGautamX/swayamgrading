@@ -6,17 +6,15 @@
     <div class="side-panel">
         <div class="class-actions">
             <div class="dropdown">
-                <button class="btn btn-primary dropdown-toggle" 
-                        onclick="toggleDropdown()">
+                <button class="btn btn-primary dropdown-toggle" onclick="toggleDropdown()">
                     <i class="fas fa-plus"></i> New Class
                 </button>
                 <div class="dropdown-menu" id="classDropdown">
-                    <div class="dropdown-item" 
+                    <div class="dropdown-item"
                         onclick="window.location.href='{{ url_for('views.import_google_classroom') }}'">
                         <i class="fab fa-google"></i> Import from Google Classroom
                     </div>
-                    <div class="dropdown-item"
-                        onclick="window.location.href='{{ url_for('views.create_class') }}'">
+                    <div class="dropdown-item" onclick="window.location.href='{{ url_for('views.create_class') }}'">
                         <i class="fas fa-file-alt"></i> Create Manually
                     </div>
                 </div>
@@ -27,21 +25,23 @@
         <div class="class-list">
             <h3 class="panel-title"><i class="fas fa-chalkboard"></i> My Classes</h3>
             {% for class in current_user.classes %}
-            <div class="class-card" onclick="window.location.href='{{ url_for('views.view_class', class_id=class.id) }}'">
+            <div class="class-card"
+                onclick="window.location.href='{{ url_for('views.view_class', class_id=class.id) }}'">
                 <div class="class-header">
-                    <h3 >{{ class.name }}</h3>
-                    <button class="btn-icon delete-class-btn" onclick="confirmDeleteClass({{ class.id }}, '{{ class.name }}')">
+                    <h3>{{ class.name }}</h3>
+                    <button class="btn-icon delete-class-btn"
+                        onclick="confirmDeleteClass({{ class.id }}, '{{ class.name }}')">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
                 <p class="meta">{{ class.level|capitalize }} Level</p>
-                
+
                 {% for assignment in class.assignments %}
                 <div class="assignment-item">
                     <div class="assignment-header">
                         <span>{{ assignment.name }}</span>
-                        <button class="btn-icon" 
-                        onclick="window.location.href='{{ url_for('views.grade_assignment', assignment_id=assignment.id) }}'">
+                        <button class="btn-icon"
+                            onclick="window.location.href='{{ url_for('views.grade_assignment', assignment_id=assignment.id) }}'">
                             <i class="fas fa-clipboard-check"></i>
                         </button>
                     </div>
@@ -98,20 +98,74 @@
                 <h3><i class="fas fa-bolt"></i> Quick Grade Assignment</h3>
             </div>
             <form id="quick-grade-form">
+                <!-- Question Section with OCR -->
                 <div class="form-group">
-                    <textarea name="question" placeholder="Assignment Question" required></textarea>
+                    <label><i class="fas fa-question-circle"></i> Assignment Question</label>
+                    <textarea id="questionText" name="question" placeholder="Type question or extract from images below"
+                        required></textarea>
+                    <div class="ocr-section">
+                        <label class="file-label">
+                            <i class="fas fa-image"></i> Upload Question Images (optional)
+                            <input type="file" id="questionImages" accept="image/*" multiple>
+                        </label>
+                        <button type="button" class="btn btn-secondary btn-sm extract-btn"
+                            onclick="extractQuestionText()">
+                            <i class="fas fa-magic"></i> Extract Text from Images
+                        </button>
+                        <div id="questionOcrStatus" class="ocr-status"></div>
+                    </div>
+                    <div class="ocr-section" style="margin-top: 0.5rem;">
+                        <label class="file-label">
+                            <i class="fas fa-file-pdf"></i> Upload Question PDF (optional)
+                            <input type="file" id="questionPdf" accept=".pdf">
+                        </label>
+                        <button type="button" class="btn btn-secondary btn-sm extract-btn"
+                            onclick="extractQuestionPdf()">
+                            <i class="fas fa-file-alt"></i> Extract Text from PDF
+                        </button>
+                        <div id="questionPdfStatus" class="ocr-status"></div>
+                    </div>
                 </div>
+
+                <!-- Answer Section with OCR -->
                 <div class="form-group">
-                    <textarea name="student_answer" placeholder="Student Answer" required></textarea>
+                    <label><i class="fas fa-pen"></i> Student Answer</label>
+                    <textarea id="answerText" name="student_answer"
+                        placeholder="Type answer or extract from images below" required></textarea>
+                    <div class="ocr-section">
+                        <label class="file-label">
+                            <i class="fas fa-image"></i> Upload Answer Images (optional)
+                            <input type="file" id="answerImages" accept="image/*" multiple>
+                        </label>
+                        <button type="button" class="btn btn-secondary btn-sm extract-btn"
+                            onclick="extractAnswerText()">
+                            <i class="fas fa-magic"></i> Extract Text from Images
+                        </button>
+                        <div id="answerOcrStatus" class="ocr-status"></div>
+                    </div>
+                    <div class="ocr-section" style="margin-top: 0.5rem;">
+                        <label class="file-label">
+                            <i class="fas fa-file-pdf"></i> Upload Answer PDF (optional)
+                            <input type="file" id="answerPdf" accept=".pdf">
+                        </label>
+                        <button type="button" class="btn btn-secondary btn-sm extract-btn" onclick="extractAnswerPdf()">
+                            <i class="fas fa-file-alt"></i> Extract Text from PDF
+                        </button>
+                        <div id="answerPdfStatus" class="ocr-status"></div>
+                    </div>
                 </div>
+
+                <!-- Rubric Selection -->
                 <div class="form-group">
-                    <select name="rubric_id">
-                        <option value="">Select Rubric (optional)</option>
-                        {% for rubric in current_user.rubrics %}
+                    <label><i class="fas fa-clipboard-list"></i> Select Rubric</label>
+                    <select name="rubric_id" required>
+                        <option value="">Select Rubric</option>
+                        {% for rubric in rubrics %}
                         <option value="{{ rubric.id }}">{{ rubric.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
+
                 <button type="submit" class="btn btn-primary">
                     <i class="fas fa-check"></i> Generate Grade
                 </button>
@@ -135,7 +189,8 @@
         </div>
         <div class="modal-body">
             <p>Are you sure you want to delete <span id="className"></span>?</p>
-            <p class="warning">This action cannot be undone. All assignments and submissions will be permanently deleted.</p>
+            <p class="warning">This action cannot be undone. All assignments and submissions will be permanently
+                deleted.</p>
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
@@ -149,30 +204,102 @@
 </div>
 
 <script>
-    document.getElementById("quick-grade-form").addEventListener("submit", async function(event) {
+    document.getElementById("quick-grade-form").addEventListener("submit", async function (event) {
         event.preventDefault();
-        
+
         let formData = new FormData(this);
         let responseElement = document.getElementById("response");
-    
+
         let data = {
             question: formData.get("question"),
             student_answer: formData.get("student_answer"),
             rubric_id: formData.get("rubric_id")
         };
-    
+
         responseElement.innerHTML = "<p><i class='fas fa-spinner fa-spin'></i> Grading in progress...</p>";
-    
-        let response = await fetch("/grade", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(data)
-        });
-    
-        let result = await response.json();
-        responseElement.innerHTML = "<p>" + result.feedback + "</p>";
+
+        try {
+            let response = await fetch("/grade", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(data)
+            });
+
+            let result = await response.json();
+
+            if (result.error) {
+                responseElement.innerHTML = `<div class="error"><i class="fas fa-exclamation-triangle"></i> Error: ${result.error}</div>`;
+                return;
+            }
+
+            // Format grade to ensure it's in the correct format
+            let grade = result.grade ? String(result.grade) : "0/100";
+            if (!grade.includes("/")) {
+                grade = `${grade}/100`;
+            }
+
+            // Handle rubric display
+            let rubricHtml = "";
+            if (result.rubric && typeof result.rubric === 'object') {
+                rubricHtml = "<ul>";
+                for (const [key, value] of Object.entries(result.rubric)) {
+                    // Handle both string and object rubric formats
+                    if (typeof value === 'object') {
+                        rubricHtml += `
+                            <li>
+                                <strong>${key}:</strong>
+                                <div class="rubric-detail">
+                                    <div><strong>Rating:</strong> ${value.rating || value.score || 'N/A'}</div>
+                                    <div><strong>Score:</strong> ${value.score || 'N/A'}</div>
+                                    <div><strong>Explanation:</strong> ${value.description || value.explanation || 'No explanation provided'}</div>
+                                </div>
+                            </li>`;
+                    } else {
+                        rubricHtml += `<li><strong>${key}:</strong> ${value}</li>`;
+                    }
+                }
+                rubricHtml += "</ul>";
+            } else {
+                rubricHtml = "<p>No detailed rubric available.</p>";
+            }
+
+            // Update the DOM with the structured feedback
+            responseElement.innerHTML = `
+                <div class="feedback-section">
+                    <h4><i class="fas fa-comments"></i> Feedback</h4>
+                    <p>${result.feedback || 'No feedback available'}</p>
+                </div>
+                <div class="grade-section">
+                    <h4><i class="fas fa-star"></i> Grade</h4>
+                    <p class="grade">${grade}</p>
+                </div>
+                <div class="summary-section">
+                    <h4><i class="fas fa-file-alt"></i> Summary</h4>
+                    <p>${result.summary || 'No summary available'}</p>
+                </div>
+                <div class="glow-section">
+                    <h4><i class="fas fa-lightbulb"></i> Glow</h4>
+                    <p>${result.glow || 'No glow points available'}</p>
+                </div>
+                <div class="grow-section">
+                    <h4><i class="fas fa-seedling"></i> Grow</h4>
+                    <p>${result.grow || 'No grow points available'}</p>
+                </div>
+                <div class="think-about-it-section">
+                    <h4><i class="fas fa-brain"></i> Think About It</h4>
+                    <p>${result.think_about_it || 'No reflection points available'}</p>
+                </div>
+                <div class="rubric-section">
+                    <h4><i class="fas fa-list-check"></i> Rubric</h4>
+                    ${rubricHtml}
+                </div>
+            `;
+        } catch (error) {
+            console.error("Fetch error:", error);
+            responseElement.innerHTML = `<div class="error"><i class="fas fa-exclamation-triangle"></i> An error occurred: ${error.message || 'Please check your connection.'}</div>`;
+        }
     });
 
     function toggleDropdown() {
@@ -181,50 +308,180 @@
     }
 
     // Close dropdown when clicking outside
-    window.onclick = function(event) {
+    window.onclick = function (event) {
         if (!event.target.matches('.dropdown-toggle')) {
             const dropdowns = document.getElementsByClassName("dropdown-menu");
             for (let i = 0; i < dropdowns.length; i++) {
                 dropdowns[i].style.display = 'none';
             }
         }
-        
+
         // Close delete modal when clicking outside
         if (event.target == document.getElementById('deleteClassModal')) {
             closeDeleteModal();
         }
     };
-    
+
     // Delete class confirmation
     function confirmDeleteClass(classId, className) {
         // Prevent event propagation
         event.stopPropagation();
-        
+
         // Set the class name in the modal
         document.getElementById('className').textContent = className;
-        
+
         // Set the form action
         document.getElementById('deleteClassForm').action = '/delete-class/' + classId;
-        
+
         // Show the modal
         document.getElementById('deleteClassModal').style.display = 'block';
     }
-    
+
     function closeDeleteModal() {
         document.getElementById('deleteClassModal').style.display = 'none';
     }
-    
+
     function showQuickGrade() {
         const quickGradeElement = document.getElementById('quick-grade');
         quickGradeElement.style.display = quickGradeElement.style.display === 'block' ? 'none' : 'block';
         quickGradeElement.scrollIntoView({ behavior: 'smooth' });
     }
-    
+
+    // OCR Functions using Tesseract.js
+    async function extractTextFromImages(fileInput, targetTextarea, statusDiv) {
+        const files = fileInput.files;
+        if (!files || files.length === 0) {
+            alert("Please select at least one image");
+            return;
+        }
+
+        statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Initializing OCR...';
+        let extractedText = '';
+
+        try {
+            for (let i = 0; i < files.length; i++) {
+                statusDiv.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Processing image ${i + 1}/${files.length}...`;
+
+                const result = await Tesseract.recognize(
+                    files[i],
+                    'eng',
+                    {
+                        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+                        preserve_interword_spaces: '1',
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                const progress = Math.round(m.progress * 100);
+                                statusDiv.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Processing image ${i + 1}/${files.length}: ${progress}%`;
+                            }
+                        }
+                    }
+                );
+
+                extractedText += result.data.text + '\n\n';
+            }
+
+            // Set the extracted text to the textarea
+            targetTextarea.value = extractedText.trim();
+            statusDiv.innerHTML = '<i class="fas fa-check" style="color: #10b981;"></i> Text extracted successfully!';
+
+            // Clear status after 3 seconds
+            setTimeout(() => {
+                statusDiv.innerHTML = '';
+            }, 3000);
+
+        } catch (error) {
+            console.error('OCR Error:', error);
+            statusDiv.innerHTML = '<i class="fas fa-exclamation-triangle" style="color: #dc2626;"></i> Error extracting text. Please try again.';
+        }
+    }
+
+    function extractQuestionText() {
+        const fileInput = document.getElementById('questionImages');
+        const textarea = document.getElementById('questionText');
+        const statusDiv = document.getElementById('questionOcrStatus');
+        extractTextFromImages(fileInput, textarea, statusDiv);
+    }
+
+    function extractAnswerText() {
+        const fileInput = document.getElementById('answerImages');
+        const textarea = document.getElementById('answerText');
+        const statusDiv = document.getElementById('answerOcrStatus');
+        extractTextFromImages(fileInput, textarea, statusDiv);
+    }
+
+    // PDF Extraction Functions
+    async function extractTextFromPdf(fileInput, targetTextarea, statusDiv) {
+        const file = fileInput.files[0];
+        if (!file) {
+            alert("Please select a PDF file");
+            return;
+        }
+
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            alert("Please select a valid PDF file");
+            return;
+        }
+
+        statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Extracting text from PDF...';
+
+        try {
+            const formData = new FormData();
+            formData.append('pdf_file', file);
+
+            const response = await fetch('/extract-pdf-text', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.error) {
+                statusDiv.innerHTML = `<i class="fas fa-exclamation-triangle" style="color: #dc2626;"></i> ${result.error}`;
+                return;
+            }
+
+            // Append extracted text to textarea
+            if (targetTextarea.value.trim()) {
+                targetTextarea.value += '\n\n' + result.text;
+            } else {
+                targetTextarea.value = result.text;
+            }
+
+            statusDiv.innerHTML = `<i class="fas fa-check" style="color: #10b981;"></i> Extracted text from ${result.pages} page(s)!`;
+
+            // Clear status after 3 seconds
+            setTimeout(() => {
+                statusDiv.innerHTML = '';
+            }, 3000);
+
+        } catch (error) {
+            console.error('PDF extraction error:', error);
+            statusDiv.innerHTML = '<i class="fas fa-exclamation-triangle" style="color: #dc2626;"></i> Error extracting text from PDF.';
+        }
+    }
+
+    function extractQuestionPdf() {
+        const fileInput = document.getElementById('questionPdf');
+        const textarea = document.getElementById('questionText');
+        const statusDiv = document.getElementById('questionPdfStatus');
+        extractTextFromPdf(fileInput, textarea, statusDiv);
+    }
+
+    function extractAnswerPdf() {
+        const fileInput = document.getElementById('answerPdf');
+        const textarea = document.getElementById('answerText');
+        const statusDiv = document.getElementById('answerPdfStatus');
+        extractTextFromPdf(fileInput, textarea, statusDiv);
+    }
+
     function openRubricModal() {
         // This function would open a rubric creation modal
         alert("Rubric creation functionality to be implemented");
     }
 </script>
+
+<!-- Tesseract.js for OCR -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
     /* Dashboard Container Layout */
@@ -233,19 +490,19 @@
         gap: 1.5rem;
         min-height: calc(100vh - 60px);
     }
-    
+
     /* Side Panel Styles */
     .side-panel {
         width: 300px;
         background-color: #f5f8fa;
         border-radius: 10px;
         padding: 1.5rem;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         display: flex;
         flex-direction: column;
         gap: 1.5rem;
     }
-    
+
     /* Panel Title Styles */
     .panel-title {
         margin-bottom: 1.5rem;
@@ -254,19 +511,19 @@
         align-items: center;
         gap: 0.5rem;
     }
-    
+
     /* Main Panel Styles */
     .main-panel {
         flex: 1;
         padding: 1.5rem;
         background-color: #ffffff;
         border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         display: flex;
         flex-direction: column;
         gap: 1.5rem;
     }
-    
+
     /* Tool Grid Layout */
     .tool-grid {
         display: grid;
@@ -274,39 +531,39 @@
         gap: 1.5rem;
         margin-bottom: 1.5rem;
     }
-    
+
     /* Card Styles */
     .card {
         background-color: #fff;
         border-radius: 10px;
         padding: 1.5rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         transition: transform 0.2s, box-shadow 0.2s;
         border-left: 4px solid var(--secondary);
     }
-    
+
     .card:hover {
         transform: translateY(-3px);
-        box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+        box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
     }
-    
+
     /* Tool Card Specific Styles */
     .tool-card {
         text-align: center;
         cursor: pointer;
         padding: 2rem 1.5rem;
     }
-    
+
     .tool-card i {
         color: var(--interactive);
         margin-bottom: 1rem;
     }
-    
+
     .tool-card h3 {
         color: var(--tertiary);
         margin: 0;
     }
-    
+
     /* Card Header Styles */
     .card-header {
         display: flex;
@@ -316,14 +573,14 @@
         padding-bottom: 0.5rem;
         border-bottom: 1px solid #eaecef;
     }
-    
+
     .card-header h3 {
         margin: 0;
         display: flex;
         align-items: center;
         gap: 0.5rem;
     }
-    
+
     /* Assignment Header Styles */
     .assignment-header {
         display: flex;
@@ -331,7 +588,7 @@
         align-items: center;
         margin-bottom: 1.5rem;
     }
-    
+
     .assignment-header h2 {
         margin: 0;
         display: flex;
@@ -339,13 +596,14 @@
         gap: 0.5rem;
         color: var(--tertiary);
     }
-    
+
     /* Form Styles */
     .form-group {
         margin-bottom: 1rem;
     }
-    
-    textarea, select {
+
+    textarea,
+    select {
         width: 100%;
         padding: 0.75rem;
         border: 1px solid #dbe1e8;
@@ -354,11 +612,11 @@
         margin-bottom: 1rem;
         font-family: inherit;
     }
-    
+
     textarea {
         min-height: 120px;
     }
-    
+
     /* Button Styles */
     .btn {
         cursor: pointer;
@@ -371,35 +629,35 @@
         transition: all 0.2s;
         border: none;
     }
-    
+
     .btn-primary {
         background-color: var(--interactive);
         color: white;
     }
-    
+
     .btn-primary:hover {
         background-color: #48A6A7;
         transform: translateY(-2px);
     }
-    
+
     .btn-secondary {
         background-color: #e9ecef;
         color: #495057;
     }
-    
+
     .btn-secondary:hover {
         background-color: #dee2e6;
     }
-    
+
     .btn-danger {
         background-color: #dc3545;
         color: white;
     }
-    
+
     .btn-danger:hover {
         background-color: #bd2130;
     }
-    
+
     .btn-icon {
         background: none;
         border: none;
@@ -410,43 +668,43 @@
         border-radius: 4px;
         transition: all 0.2s;
     }
-    
+
     .btn-icon:hover {
         background-color: #f1f3f5;
         color: #495057;
     }
-    
+
     /* Class List and Card Styles */
     .class-list {
         display: flex;
         flex-direction: column;
         gap: 1rem;
     }
-    
+
     .class-card {
         background-color: white;
         padding: 1rem;
         border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         transition: transform 0.2s, box-shadow 0.2s;
         overflow: hidden;
         border-left: 4px solid var(--primary);
     }
-    
+
     .class-card:hover {
         transform: translateY(-3px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     }
-    
+
     .class-card.active {
         border-left: 4px solid var(--interactive);
         background-color: #e6f7f8;
     }
-    
+
     .class-actions {
         margin-bottom: 1.5rem;
     }
-    
+
     /* Assignment Item Styles */
     .assignment-item {
         background-color: #f8f9fa;
@@ -455,19 +713,19 @@
         margin-top: 0.75rem;
         font-size: 0.9rem;
     }
-    
+
     .assignment-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
     }
-    
+
     /* Dropdown Styles */
     .dropdown {
         position: relative;
         display: inline-block;
     }
-    
+
     .dropdown-toggle {
         display: flex;
         align-items: center;
@@ -475,19 +733,19 @@
         width: 100%;
         text-align: left;
     }
-    
+
     .dropdown-menu {
         display: none;
         position: absolute;
         background-color: white;
         min-width: 220px;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
         z-index: 1;
         border-radius: 8px;
         padding: 0.5rem 0;
         margin-top: 0.25rem;
     }
-    
+
     .dropdown-item {
         padding: 0.75rem 1rem;
         cursor: pointer;
@@ -496,25 +754,25 @@
         align-items: center;
         gap: 0.5rem;
     }
-    
+
     .dropdown-item:hover {
         background-color: #f1f3f5;
     }
-    
+
     /* Meta Styles */
     .meta {
         color: #6c757d;
         font-size: 0.85rem;
         margin: 0.25rem 0 0.5rem;
     }
-    
+
     /* Rubrics Preview Styles */
     .rubrics-preview {
         display: flex;
         flex-direction: column;
         gap: 0.75rem;
     }
-    
+
     .rubric-item {
         display: flex;
         justify-content: space-between;
@@ -524,16 +782,16 @@
         border-radius: 6px;
         transition: background-color 0.2s;
     }
-    
+
     .rubric-item:hover {
         background-color: #e9ecef;
     }
-    
+
     .rubric-item h4 {
         margin: 0;
         font-weight: 600;
     }
-    
+
     .badge {
         background-color: var(--primary);
         color: #495057;
@@ -541,17 +799,106 @@
         border-radius: 15px;
         font-size: 0.75rem;
     }
-    
+
     /* Quick Grade Styles */
     #quick-grade {
         display: none;
         margin-top: 1rem;
     }
-    
+
     .response-container {
         margin-top: 1.5rem;
     }
-    
+
+    /* OCR Section Styles */
+    .ocr-section {
+        margin-top: 0.75rem;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 1px dashed #d1d5db;
+    }
+
+    .file-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        color: #4b5563;
+        cursor: pointer;
+    }
+
+    .file-label i {
+        margin-right: 0.5rem;
+        color: #6366f1;
+    }
+
+    input[type="file"] {
+        display: block;
+        width: 100%;
+        padding: 0.5rem;
+        margin-top: 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        background: white;
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+
+    input[type="file"]::-webkit-file-upload-button {
+        padding: 0.4rem 0.8rem;
+        border: none;
+        border-radius: 4px;
+        background: #6366f1;
+        color: white;
+        cursor: pointer;
+        font-weight: 500;
+    }
+
+    input[type="file"]::-webkit-file-upload-button:hover {
+        background: #5558e3;
+    }
+
+    .extract-btn {
+        margin-top: 0.75rem;
+        padding: 0.5rem 1rem;
+        background: #6c5ce7;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+
+    .extract-btn:hover {
+        background: #5e46e5;
+        transform: translateY(-1px);
+    }
+
+    .ocr-status {
+        margin-top: 0.75rem;
+        padding: 0.5rem;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        min-height: 1.5rem;
+    }
+
+    .ocr-status i {
+        margin-right: 0.5rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #374151;
+    }
+
+    .form-group label i {
+        margin-right: 0.5rem;
+        color: #6366f1;
+    }
+
     /* Question Container Styles */
     .question-container {
         background-color: #f8f9fa;
@@ -560,7 +907,129 @@
         margin: 1rem 0;
         border-left: 3px solid var(--secondary);
     }
-    
+
+    /* Feedback Sections Styles */
+    .feedback-section,
+    .grade-section,
+    .summary-section,
+    .glow-section,
+    .grow-section,
+    .think-about-it-section,
+    .rubric-section {
+        margin-bottom: 1.5rem;
+        padding: 1.2rem;
+        border-radius: 8px;
+        background: #f9fafb;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        border-left: 4px solid #3b82f6;
+    }
+
+    .feedback-section h4,
+    .grade-section h4,
+    .summary-section h4,
+    .glow-section h4,
+    .grow-section h4,
+    .think-about-it-section h4,
+    .rubric-section h4 {
+        color: #2563eb;
+        margin-bottom: 0.8rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    /* Section-specific colors */
+    .grade-section {
+        border-left-color: #10b981;
+    }
+
+    .grade-section h4 {
+        color: #10b981;
+    }
+
+    .glow-section {
+        border-left-color: #f59e0b;
+    }
+
+    .glow-section h4 {
+        color: #f59e0b;
+    }
+
+    .grow-section {
+        border-left-color: #8b5cf6;
+    }
+
+    .grow-section h4 {
+        color: #8b5cf6;
+    }
+
+    .think-about-it-section {
+        border-left-color: #ec4899;
+    }
+
+    .think-about-it-section h4 {
+        color: #ec4899;
+    }
+
+    .rubric-section {
+        border-left-color: #6366f1;
+    }
+
+    .rubric-section h4 {
+        color: #6366f1;
+    }
+
+    .grade {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #10b981;
+        text-align: center;
+        margin: 1rem 0;
+    }
+
+    /* Rubric Styles */
+    .rubric-section ul {
+        list-style-type: none;
+        padding: 0;
+    }
+
+    .rubric-section ul li {
+        background: #f3f4f6;
+        margin: 0.8rem 0;
+        padding: 1rem;
+        border-radius: 6px;
+        transition: background-color 0.2s;
+    }
+
+    .rubric-section ul li:hover {
+        background: #e5e7eb;
+    }
+
+    .rubric-detail {
+        padding: 0.8rem 0 0 1.2rem;
+        margin-top: 0.5rem;
+        border-left: 3px solid #d1d5db;
+    }
+
+    .rubric-detail div {
+        margin-bottom: 0.5rem;
+    }
+
+    /* Error Styles */
+    .error {
+        color: #dc2626;
+        font-weight: bold;
+        padding: 1rem;
+        background: #fef2f2;
+        border-radius: 8px;
+        margin: 1rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
     /* No Items Style */
     .no-items {
         text-align: center;
@@ -569,7 +1038,7 @@
         border-radius: 8px;
         color: #6c757d;
     }
-    
+
     /* Modal Styles */
     .modal {
         display: none;
@@ -581,7 +1050,7 @@
         height: 100%;
         background-color: rgba(0, 0, 0, 0.5);
     }
-    
+
     .modal-content {
         background-color: #fff;
         margin: 10% auto;
@@ -592,12 +1061,19 @@
         max-width: 90%;
         animation: modalFadeIn 0.3s;
     }
-    
+
     @keyframes modalFadeIn {
-        from {opacity: 0; transform: translateY(-30px);}
-        to {opacity: 1; transform: translateY(0);}
+        from {
+            opacity: 0;
+            transform: translateY(-30px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
     }
-    
+
     .modal-header {
         padding: 1.5rem;
         border-bottom: 1px solid #eee;
@@ -605,16 +1081,16 @@
         justify-content: space-between;
         align-items: center;
     }
-    
+
     .modal-header h2 {
         margin: 0;
         color: var(--tertiary);
     }
-    
+
     .modal-body {
         padding: 1.5rem;
     }
-    
+
     .modal-footer {
         padding: 1rem 1.5rem;
         border-top: 1px solid #eee;
@@ -622,7 +1098,7 @@
         justify-content: flex-end;
         gap: 1rem;
     }
-    
+
     .close {
         color: #aaa;
         font-size: 28px;
@@ -630,11 +1106,11 @@
         cursor: pointer;
         transition: color 0.2s;
     }
-    
+
     .close:hover {
         color: #555;
     }
-    
+
     .warning {
         color: #dc3545;
         font-weight: 500;
@@ -643,25 +1119,25 @@
         border-radius: 6px;
         margin-top: 1rem;
     }
-    
+
     /* Class header with delete button */
     .class-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
     }
-    
+
     .class-header h3 {
         margin: 0;
         flex-grow: 1;
         cursor: pointer;
         transition: color 0.2s;
     }
-    
+
     .class-header h3:hover {
         color: var(--interactive);
     }
-    
+
     .delete-class-btn {
         color: #dc3545;
         background: none;
@@ -672,22 +1148,22 @@
         transition: all 0.2s;
         border-radius: 4px;
     }
-    
+
     .delete-class-btn:hover {
         color: #bd2130;
         background-color: rgba(220, 53, 69, 0.1);
     }
-    
+
     /* Responsive Design */
     @media (max-width: 768px) {
         .dashboard-container {
             flex-direction: column;
         }
-        
+
         .side-panel {
             width: 100%;
         }
-        
+
         .tool-grid {
             grid-template-columns: 1fr;
         }

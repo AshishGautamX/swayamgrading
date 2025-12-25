@@ -347,9 +347,9 @@
                                         <li>
                                             <strong>${key}:</strong>
                                             <div class="rubric-detail">
-                                                <div><strong>Rating:</strong> ${value.rating || 'N/A'}</div>
+                                                <div><strong>Rating:</strong> ${value.rating || value.score || 'N/A'}</div>
                                                 <div><strong>Score:</strong> ${value.score || 'N/A'}</div>
-                                                <div><strong>Explanation:</strong> ${value.explanation || 'No explanation provided'}</div>
+                                                <div><strong>Explanation:</strong> ${value.description || value.explanation || 'No explanation provided'}</div>
                                             </div>
                                         </li>`;
                                 } else {
