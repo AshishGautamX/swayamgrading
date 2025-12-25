@@ -3,6 +3,13 @@ Flask-WTF==1.2.1
 Flask-Limiter==3.5.0
 email-validator==2.1.0
 
+# Scalability packages
+Flask-Caching==2.1.0
+celery==5.3.6
+redis==5.0.1
+psycopg2-binary==2.9.9
+kombu==5.3.4
+
 alembic==1.14.1
 annotated-types==0.7.0
 argcomplete==1.10.3

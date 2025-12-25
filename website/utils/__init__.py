@@ -17,6 +17,12 @@ from .helpers import (
     parse_ai_score
 )
 
+from .pagination import (
+    Pagination,
+    paginate,
+    get_page_args
+)
+
 __all__ = [
     'sanitize_input',
     'validate_class_name',
@@ -25,5 +31,9 @@ __all__ = [
     'extract_grade',
     'clean_ai_response',
     'extract_section',
-    'parse_ai_score'
+    'parse_ai_score',
+    'Pagination',
+    'paginate',
+    'get_page_args'
 ]
+
