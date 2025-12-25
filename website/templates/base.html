@@ -1,419 +1,449 @@
- <!-- templates/base.html --> 
- <!DOCTYPE html>
- <html lang="en">
- <head>
-     <meta charset="UTF-8">
-     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-     <title>Swayam - AI Grading Assistant</title>
-     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-     <style>
-         :root {
-             --primary: #F2EFE7;
-             --secondary: #9ACBD0;
-             --tertiary: #48A6A7;
-             --interactive: #2973B2;
-             --nav-height: 60px;
-         }
- 
-         * {
-             margin: 0;
-             padding: 0;
-             box-sizing: border-box;
-         }
- 
-         body {
-             font-family: 'Segoe UI', sans-serif;
-             background: var(--primary);
-             min-height: 100vh;
-         }
- 
-         /* Navigation */
-         .navbar {
-             background: white;
-             height: var(--nav-height);
-             display: flex;
-             justify-content: space-between;
-             align-items: center;
-             padding: 0 2rem;
-             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-         }
- 
-         .nav-brand {
-             font-size: 1.5rem;
-             color: var(--tertiary);
-             font-weight: 600;
-         }
- 
-         .nav-menu {
-             display: flex;
-             gap: 1.5rem;
-             align-items: center;
-         }
- 
-         /* Dashboard Layout */
-         .dashboard-container {
-             display: grid;
-             grid-template-columns: 300px 1fr;
-             gap: 2rem;
-             padding: 2rem;
-             min-height: calc(100vh - var(--nav-height));
-         }
- 
-         .side-panel {
-             background: white;
-             border-radius: 12px;
-             padding: 1.5rem;
-             box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-         }
- 
-         .main-panel {
-             background: white;
-             border-radius: 12px;
-             padding: 2rem;
-             box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-         }
- 
-         /* Class Cards */
-         .class-card {
-             background: var(--primary);
-             border-radius: 8px;
-             padding: 1rem;
-             margin: 1rem 0;
-             transition: transform 0.2s;
-         }
- 
-         .class-card:hover {
-             transform: translateX(5px);
-             cursor: pointer;
-         }
- 
-         /* Buttons */
-         .btn {
-             padding: 0.8rem 1.5rem;
-             border: none;
-             border-radius: 8px;
-             cursor: pointer;
-             transition: all 0.3s ease;
-         }
- 
-         .btn-primary {
-             background: var(--interactive);
-             color: white;
-         }
- 
-         .btn-primary:hover {
-             background: var(--tertiary);
-         }
- 
-         /* Forms */
-         .form-group {
-             margin: 1rem 0;
-         }
- 
-         input, textarea, select {
-             width: 100%;
-             padding: 0.8rem;
-             border: 1px solid #ddd;
-             border-radius: 6px;
-             margin-top: 0.5rem;
-         }
- 
-          /* Add to existing styles */
-         .btn-secondary {
-             background: var(--secondary);
-             color: white;
-         }
- 
-         .btn-secondary:hover {
-             background: var(--tertiary);
-         }
-          /* Class Creation Dropdown */
-     .dropdown-menu {
-         position: absolute;
-         background: white;
-         border-radius: 8px;
-         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-         padding: 0.5rem;
-         z-index: 1000;
-         min-width: 200px;
-         display: none;
-     }
-     
-     .dropdown-item {
-         padding: 0.8rem 1rem;
-         cursor: pointer;
-         transition: all 0.2s ease;
-         border-radius: 6px;
-     }
- 
-     .dropdown-item:hover {
-         background: var(--primary);
-     }
- 
-     /* Class View Styles */
-     .assignment-header {
-         display: flex;
-         justify-content: space-between;
-         align-items: center;
-         margin-bottom: 1rem;
-     }
- 
-     .submission-list {
-         margin-top: 1.5rem;
-         border-top: 2px solid var(--primary);
-         padding-top: 1rem;
-     }
- 
-     .submission-item {
-         display: flex;
-         justify-content: space-between;
-         align-items: center;
-         padding: 1rem;
-         margin: 0.5rem 0;
-         background: var(--primary);
-         border-radius: 8px;
-     }
-     .card-header {
-         display: flex;
-         justify-content: space-between;
-         align-items: center;
-         margin-bottom: 1rem;
-     }
- 
-     .rubrics-preview {
-         display: grid;
-         gap: 0.5rem;
-     }
- 
-     .rubric-item {
-         display: flex;
-         justify-content: space-between;
-         align-items: center;
-         padding: 0.5rem;
-         background: var(--secondary);
-         border-radius: 6px;
-     }
- 
-     .badge {
-         background: var(--tertiary);
-         color: white;
-         padding: 0.25rem 0.5rem;
-         border-radius: 4px;
-         font-size: 0.8rem;
-     }
-    
-     .modal {
-        display: none; /* Hidden by default */
-        position: fixed; /* Stay in place */
-        z-index: 1000; /* Sit on top */
-        left: 0;
-        top: 0;
-        width: 100%; /* Full width */
-        height: 100%; /* Full height */
-        overflow: auto; /* Enable scroll if needed */
-        background-color: rgba(0, 0, 0, 0.5); /* Black w/ opacity */
-        
-    }
+<!-- templates/base.html -->
+<!DOCTYPE html>
+<html lang="en">
 
-    .modal-content {
-        background-color: white;
-        margin: auto;
-        padding: 20px;
-        border: 1px solid #888;
-        width: 80%; /* Could be more or less, depending on screen size */
-        max-width: 500px; /* Limit the width of the modal */
-        border-radius: 12px; /* Rounded corners */
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        cursor: pointer;
-    }
-    .assignment-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        cursor: default; /* Prevent text selection cursor */
-        user-select: none; /* Disable text selection */
-    }
-    
-    .btn-icon {
-        margin-left: 1rem;
-        padding: 0.5rem;
-        border-radius: 50%;
-        transition: all 0.3s ease;
-    }
-    
-    .btn-icon:hover {
-        background: var(--primary);
-    }
-    .modal-close {
-        color: #aaa;
-        float: right;
-        font-size: 28px;
-        font-weight: bold;
-    }
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIGrader - AI Grading Assistant</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #F2EFE7;
+            --secondary: #9ACBD0;
+            --tertiary: #48A6A7;
+            --interactive: #2973B2;
+            --nav-height: 60px;
+        }
 
-    .modal-close:hover,
-    .modal-close:focus {
-        color: black;
-        text-decoration: none;
-        cursor: pointer;
-    }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-    /* Adding Blur Background Effect */
-    body.modal-open {
-        overflow-y: hidden; /* Prevent scrolling when modal is open */
-    }
-    
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: var(--primary);
+            min-height: 100vh;
+        }
 
- 
- 
-         /* Animations */
-         @keyframes slideIn {
-             from { transform: translateY(20px); opacity: 0; }
-             to { transform: translateY(0); opacity: 1; }
-         }
- 
-         .card {
-             animation: slideIn 0.3s ease-out;
-             background: white;
-             border-radius: 12px;
-             padding: 2rem;
-             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-             transition: transform 0.2s;
-             margin: 1rem 0;
-             
-         }
-         .tool-card h3,i {
+        /* Navigation */
+        .navbar {
+            background: white;
+            height: var(--nav-height);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav-brand {
+            font-size: 1.5rem;
+            color: var(--tertiary);
+            font-weight: 600;
+        }
+
+        .nav-menu {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        /* Dashboard Layout */
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 2rem;
+            padding: 2rem;
+            min-height: calc(100vh - var(--nav-height));
+        }
+
+        .side-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        .main-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Class Cards */
+        .class-card {
+            background: var(--primary);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+            transition: transform 0.2s;
+        }
+
+        .class-card:hover {
+            transform: translateX(5px);
             cursor: pointer;
-         }
- 
-         @media (max-width: 768px) {
-             .dashboard-container {
-                 grid-template-columns: 1fr;
-                 padding: 1rem;
-             }
-         }
+        }
 
-       /* Add to existing styles */
-       .grade-badge {
-        background: var(--tertiary);
-        color: white;
-        padding: 0.3rem 0.8rem;
-        border-radius: 15px;
-        font-weight: bold;
-    }
-    
-    .ai-line {
-        background: #fff3cd;
-        border-left: 3px solid #ffc107;
-        padding-left: 0.5rem;
-        margin: 0.2rem 0;
-    }
-     </style>
- </head>
- <body>
-     <nav class="navbar">
-         <div class="nav-brand">
-             <i class="fas fa-graduation-cap"></i> Swayam
-         </div>
-         <div class="nav-menu">
-             {% if current_user.is_authenticated %}
-                     <div class="profile-dropdown">
-                         <a href="/" class="btn btn-primary">  <i class="fas fa-user"></i> {{ current_user.name }}
-                         </a>
-                     </div>
-                     <div class="profile-menu">
-                         <a href="#" class="profile-menu-item">Profile</a>
-                         <a href="{{ url_for('auth.logout') }}" class="profile-menu-item">Logout</a>
-                     </div>
-                 </div>
-             {% else %}
-                 <a href="{{ url_for('auth.google_login') }}" class="btn btn-primary">Login</a>
-                 <a href="{{ url_for('auth.google_login') }}" class="btn btn-primary">Sign Up</a>
-             {% endif %}
-         </div>
-     </nav>
-    
-     <div id="rubric-modal" class="modal">
+        /* Buttons */
+        .btn {
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: var(--interactive);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--tertiary);
+        }
+
+        /* Forms */
+        .form-group {
+            margin: 1rem 0;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 0.8rem;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-top: 0.5rem;
+        }
+
+        /* Add to existing styles */
+        .btn-secondary {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: var(--tertiary);
+        }
+
+        /* Class Creation Dropdown */
+        .dropdown-menu {
+            position: absolute;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            padding: 0.5rem;
+            z-index: 1000;
+            min-width: 200px;
+            display: none;
+        }
+
+        .dropdown-item {
+            padding: 0.8rem 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-radius: 6px;
+        }
+
+        .dropdown-item:hover {
+            background: var(--primary);
+        }
+
+        /* Class View Styles */
+        .assignment-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .submission-list {
+            margin-top: 1.5rem;
+            border-top: 2px solid var(--primary);
+            padding-top: 1rem;
+        }
+
+        .submission-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            background: var(--primary);
+            border-radius: 8px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .rubrics-preview {
+            display: grid;
+            gap: 0.5rem;
+        }
+
+        .rubric-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            background: var(--secondary);
+            border-radius: 6px;
+        }
+
+        .badge {
+            background: var(--tertiary);
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
+        .modal {
+            display: none;
+            /* Hidden by default */
+            position: fixed;
+            /* Stay in place */
+            z-index: 1000;
+            /* Sit on top */
+            left: 0;
+            top: 0;
+            width: 100%;
+            /* Full width */
+            height: 100%;
+            /* Full height */
+            overflow: auto;
+            /* Enable scroll if needed */
+            background-color: rgba(0, 0, 0, 0.5);
+            /* Black w/ opacity */
+
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            /* Could be more or less, depending on screen size */
+            max-width: 500px;
+            /* Limit the width of the modal */
+            border-radius: 12px;
+            /* Rounded corners */
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+        }
+
+        .assignment-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: default;
+            /* Prevent text selection cursor */
+            user-select: none;
+            /* Disable text selection */
+        }
+
+        .btn-icon {
+            margin-left: 1rem;
+            padding: 0.5rem;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .btn-icon:hover {
+            background: var(--primary);
+        }
+
+        .modal-close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .modal-close:hover,
+        .modal-close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        /* Adding Blur Background Effect */
+        body.modal-open {
+            overflow-y: hidden;
+            /* Prevent scrolling when modal is open */
+        }
+
+
+
+
+        /* Animations */
+        @keyframes slideIn {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .card {
+            animation: slideIn 0.3s ease-out;
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+            margin: 1rem 0;
+
+        }
+
+        .tool-card h3,
+        i {
+            cursor: pointer;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-container {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+            }
+        }
+
+        /* Add to existing styles */
+        .grade-badge {
+            background: var(--tertiary);
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 15px;
+            font-weight: bold;
+        }
+
+        .ai-line {
+            background: #fff3cd;
+            border-left: 3px solid #ffc107;
+            padding-left: 0.5rem;
+            margin: 0.2rem 0;
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i class="fas fa-graduation-cap"></i> AIGrader
+        </div>
+        <div class="nav-menu">
+            {% if current_user.is_authenticated %}
+            <div class="profile-dropdown">
+                <a href="/" class="btn btn-primary"> <i class="fas fa-user"></i> {{ current_user.name }}
+                </a>
+            </div>
+            <div class="profile-menu">
+                <a href="#" class="profile-menu-item">Profile</a>
+                <a href="{{ url_for('auth.logout') }}" class="profile-menu-item">Logout</a>
+            </div>
+        </div>
+        {% else %}
+        <a href="{{ url_for('auth.google_login') }}" class="btn btn-primary">Login</a>
+        <a href="{{ url_for('auth.google_login') }}" class="btn btn-primary">Sign Up</a>
+        {% endif %}
+        </div>
+    </nav>
+
+    <div id="rubric-modal" class="modal">
         <div class="modal-content">
             <span class="modal-close" onclick="closeRubricModal()">&times;</span>
             <div id="rubric-form-container"></div>
         </div>
     </div>
- 
-     {% block content %}{% endblock %}
- 
-     <script>
-         // Handle AI Grading
-         function goToCreateRubric(url) {
-             window.location.href = url;
-         }
-         async function gradeWithAI() {
-             const answer = document.getElementById('student-answer').value;
-             const response = await fetch('/grade', {
-                 method: 'POST',
-                 headers: {
-                     'Content-Type': 'application/json',
-                 },
-                 body: JSON.stringify({
-                     answer: answer,
-                     rubric: document.getElementById('rubric').value
-                 })
-             });
-             
-             const result = await response.json();
-             document.getElementById('ai-feedback-panel').innerHTML = `
+
+    {% block content %}{% endblock %}
+
+    <script>
+        // Handle AI Grading
+        function goToCreateRubric(url) {
+            window.location.href = url;
+        }
+        async function gradeWithAI() {
+            const answer = document.getElementById('student-answer').value;
+            const response = await fetch('/grade', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    answer: answer,
+                    rubric: document.getElementById('rubric').value
+                })
+            });
+
+            const result = await response.json();
+            document.getElementById('ai-feedback-panel').innerHTML = `
                  <div class="feedback-card">
                      <h4>AI Feedback:</h4>
                      <p>${result.feedback}</p>
                      <div class="grade-badge">Grade: ${result.grade}/100</div>
                  </div>
              `;
-         }
- 
-         // Toggle Class Form
-         function showClassForm() {
-             document.getElementById('class-form').classList.toggle('hidden');
-         }
-         async function gradeWithAI() {
-             const question = document.getElementById('question').value;
-             const answer = document.getElementById('student-answer').value;
-             const rubric = document.getElementById('rubric').value;
-         
-             try {
-                 const response = await fetch('/grade', {
-                     method: 'POST',
-                     headers: {
-                         'Content-Type': 'application/json',
-                     },
-                     body: JSON.stringify({
-                         question: question,
-                         answer: answer,
-                         rubric: rubric,
-                         assignment_id: currentAssignmentId,  // Pass these if available
-                         student_id: currentUserId
-                     })
-                 });
-         
-                 const result = await response.json();
-                 
-                 if (result.error) {
-                     alert(result.error);
-                     return;
-                 }
-         
-                 // Display results
-                 document.getElementById('ai-feedback-panel').innerHTML = `
+        }
+
+        // Toggle Class Form
+        function showClassForm() {
+            document.getElementById('class-form').classList.toggle('hidden');
+        }
+        async function gradeWithAI() {
+            const question = document.getElementById('question').value;
+            const answer = document.getElementById('student-answer').value;
+            const rubric = document.getElementById('rubric').value;
+
+            try {
+                const response = await fetch('/grade', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        answer: answer,
+                        rubric: rubric,
+                        assignment_id: currentAssignmentId,  // Pass these if available
+                        student_id: currentUserId
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.error) {
+                    alert(result.error);
+                    return;
+                }
+
+                // Display results
+                document.getElementById('ai-feedback-panel').innerHTML = `
                      <div class="feedback-card">
                          <h4>AI Feedback:</h4>
                          <p>${result.feedback}</p>
                          <div class="grade-badge">Grade: ${result.grade}/100</div>
                      </div>
                  `;
-             } catch (error) {
-                 console.error('Error:', error);
-                 alert('Failed to grade assignment. Please try again.');
-             }
-         }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to grade assignment. Please try again.');
+            }
+        }
         function openRubricModal() {
             fetch("{{ url_for('views.create_rubric') }}")
                 .then(response => response.text())
@@ -423,36 +453,37 @@
                     document.body.classList.add('modal-open'); // Prevent body scroll
                 });
         }
-    
+
         function closeRubricModal() {
             document.getElementById('rubric-modal').style.display = 'none';
             document.getElementById('rubric-form-container').innerHTML = '';
             document.body.classList.remove('modal-open'); // Restore body scroll
         }
 
-         // Handle form submission
-         function handleRubricSubmit(event) {
-             event.preventDefault();
-             const form = event.target;
-             const formData = new FormData(form);
-     
-             fetch(form.action, {
-                 method: 'POST',
-                 body: formData,
-                 headers: {
-                     'X-Requested-With': 'XMLHttpRequest'
-                 }
-             })
-             .then(response => response.json())
-             .then(data => {
-                 if (data.success) {
-                     closeRubricModal();
-                     window.location.reload(); // Refresh to show new rubric
-                 } else {
-                     alert(data.message || 'Error creating rubric');
-                 }
-             });
-         }
-     </script>
- </body>
- </html>
+        // Handle form submission
+        function handleRubricSubmit(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        closeRubricModal();
+                        window.location.reload(); // Refresh to show new rubric
+                    } else {
+                        alert(data.message || 'Error creating rubric');
+                    }
+                });
+        }
+    </script>
+</body>
+
+</html>
