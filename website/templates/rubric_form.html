@@ -2,6 +2,7 @@
 <div class="rubric-form">
     <h2>Create New Rubric</h2>
     <form onsubmit="handleRubricSubmit(event)" method="POST" action="{{ url_for('views.create_rubric') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div class="form-group">
             <label>Rubric Name</label>
             <input type="text" name="name" required>

@@ -5,6 +5,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <!-- Content Security Policy for XSS protection -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https://router.huggingface.co;">
     <title>AIGrader - AI Grading Assistant</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -373,44 +377,39 @@
     {% block content %}{% endblock %}
 
     <script>
+        // ================== CSRF TOKEN HELPER ==================
+        // Get CSRF token from meta tag
+        function getCsrfToken() {
+            const metaTag = document.querySelector('meta[name="csrf-token"]');
+            return metaTag ? metaTag.getAttribute('content') : '';
+        }
+
+        // Helper function for secure fetch with CSRF
+        async function secureFetch(url, options = {}) {
+            const csrfToken = getCsrfToken();
+            const headers = {
+                'X-CSRFToken': csrfToken,
+                ...options.headers
+            };
+
+            return fetch(url, {
+                ...options,
+                headers: headers
+            });
+        }
+
         // Handle AI Grading
         function goToCreateRubric(url) {
             window.location.href = url;
         }
-        async function gradeWithAI() {
-            const answer = document.getElementById('student-answer').value;
-            const response = await fetch('/grade', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    answer: answer,
-                    rubric: document.getElementById('rubric').value
-                })
-            });
 
-            const result = await response.json();
-            document.getElementById('ai-feedback-panel').innerHTML = `
-                 <div class="feedback-card">
-                     <h4>AI Feedback:</h4>
-                     <p>${result.feedback}</p>
-                     <div class="grade-badge">Grade: ${result.grade}/100</div>
-                 </div>
-             `;
-        }
-
-        // Toggle Class Form
-        function showClassForm() {
-            document.getElementById('class-form').classList.toggle('hidden');
-        }
         async function gradeWithAI() {
             const question = document.getElementById('question').value;
             const answer = document.getElementById('student-answer').value;
             const rubric = document.getElementById('rubric').value;
 
             try {
-                const response = await fetch('/grade', {
+                const response = await secureFetch('/grade', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -419,8 +418,8 @@
                         question: question,
                         answer: answer,
                         rubric: rubric,
-                        assignment_id: currentAssignmentId,  // Pass these if available
-                        student_id: currentUserId
+                        assignment_id: typeof currentAssignmentId !== 'undefined' ? currentAssignmentId : null,
+                        student_id: typeof currentUserId !== 'undefined' ? currentUserId : null
                     })
                 });
 
@@ -444,8 +443,14 @@
                 alert('Failed to grade assignment. Please try again.');
             }
         }
+
+        // Toggle Class Form
+        function showClassForm() {
+            document.getElementById('class-form').classList.toggle('hidden');
+        }
+
         function openRubricModal() {
-            fetch("{{ url_for('views.create_rubric') }}")
+            secureFetch("{{ url_for('views.create_rubric') }}")
                 .then(response => response.text())
                 .then(html => {
                     document.getElementById('rubric-form-container').innerHTML = html;
@@ -460,13 +465,13 @@
             document.body.classList.remove('modal-open'); // Restore body scroll
         }
 
-        // Handle form submission
+        // Handle form submission with CSRF protection
         function handleRubricSubmit(event) {
             event.preventDefault();
             const form = event.target;
             const formData = new FormData(form);
 
-            fetch(form.action, {
+            secureFetch(form.action, {
                 method: 'POST',
                 body: formData,
                 headers: {

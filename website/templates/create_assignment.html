@@ -60,6 +60,7 @@
 
         <div class="card">
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <div class="form-group">
                     <label>Assignment Name <span class="required">*</span></label>
                     <input type="text" name="name" class="form-control" required>
@@ -110,6 +111,7 @@
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
                     <form id="deleteClassForm" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                         <button type="submit" class="btn btn-danger">
                             <i class="fas fa-trash"></i> Delete
                         </button>

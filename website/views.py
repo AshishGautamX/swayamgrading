@@ -1,6 +1,8 @@
 from dotenv import load_dotenv
 import tempfile
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, session
+import logging
+import html
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_login import login_required, current_user
 from .models import Assignment, Submission, db, Class, Rubric, RubricCriteria, User, GoogleClass, GradingJob, check_resource_access
 from huggingface_hub import InferenceClient
@@ -12,6 +14,8 @@ import googleapiclient.discovery
 import google.cloud
 from threading import Thread
 
+# Configure logging
+logger = logging.getLogger(__name__)
 
 SCOPES = [
     'https://www.googleapis.com/auth/classroom.courses.readonly',
@@ -32,7 +36,48 @@ views = Blueprint('views', __name__)
 
 # Configure Hugging Face Inference API with new router endpoint
 client = InferenceClient(token=API_KEY, base_url="https://router.huggingface.co")
-MODEL_NAME = "meta-llama/Llama-3.3-70B-Instruct"
+MODEL_NAME = os.getenv("AI_MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+
+# ================== INPUT VALIDATION UTILITIES ==================
+
+def sanitize_input(text, max_length=10000):
+    """Sanitize user input to prevent XSS and limit length."""
+    if text is None:
+        return None
+    # Convert to string and strip
+    text = str(text).strip()
+    # Limit length
+    if len(text) > max_length:
+        text = text[:max_length]
+    # HTML escape to prevent XSS
+    return html.escape(text)
+
+def validate_class_name(name):
+    """Validate class name."""
+    if not name or len(name.strip()) < 1:
+        return False, "Class name is required"
+    if len(name) > 150:
+        return False, "Class name must be less than 150 characters"
+    return True, sanitize_input(name)
+
+def validate_email(email):
+    """Validate email format."""
+    if not email:
+        return False, "Email is required"
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        return False, "Invalid email format"
+    if len(email) > 150:
+        return False, "Email must be less than 150 characters"
+    return True, email.lower().strip()
+
+def validate_text_field(text, field_name, max_length=10000, required=True):
+    """Validate a text field."""
+    if required and (not text or len(text.strip()) < 1):
+        return False, f"{field_name} is required"
+    if text and len(text) > max_length:
+        return False, f"{field_name} must be less than {max_length} characters"
+    return True, sanitize_input(text) if text else None
 
 
 def extract_grade(text):
@@ -129,6 +174,12 @@ def view_class(class_id):
     cls = Class.query.options(
         db.joinedload(Class.assignments).joinedload(Assignment.submissions)
     ).get_or_404(class_id)
+    
+    # Security: Check if user owns this class
+    if not check_resource_access(cls):
+        flash('You do not have permission to view this class!', category='error')
+        return redirect(url_for('views.dashboard'))
+    
     return render_template("class.html", user=current_user, cls=cls, assignments=cls.assignments)
 
 @views.route('/delete-class/<int:class_id>', methods=['POST'])
@@ -316,7 +367,7 @@ def grade_assignment():
             return jsonify(feedback_data)
     
     except Exception as e:
-        print(f"Error in grade_assignment: {str(e)}")
+        logger.error(f"Error in grade_assignment: {str(e)}")
         return jsonify({'error': str(e)}), 500
     
     # website/views.py
@@ -328,14 +379,34 @@ def grade_assignment():
 def add_submission(assignment_id):
     assignment = Assignment.query.get_or_404(assignment_id)
     
+    # Security: Check if user owns the class this assignment belongs to
+    if not check_resource_access(assignment.class_ref):
+        flash('You do not have permission to add submissions to this assignment!', category='error')
+        return redirect(url_for('views.dashboard'))
+    
     if request.method == 'POST':
         student_name = request.form.get('student_name')
         student_email = request.form.get('student_email')
         student_answer = request.form.get('student_answer')
         
-        if not student_name or not student_email or not student_answer:
-            flash('Student name, email, and answer are required!', category='error')
+        # Input validation
+        valid, result = validate_text_field(student_name, 'Student name', max_length=150)
+        if not valid:
+            flash(result, category='error')
             return redirect(url_for('views.view_class', class_id=assignment.class_id))
+        student_name = result
+        
+        valid, result = validate_email(student_email)
+        if not valid:
+            flash(result, category='error')
+            return redirect(url_for('views.view_class', class_id=assignment.class_id))
+        student_email = result
+        
+        valid, result = validate_text_field(student_answer, 'Student answer')
+        if not valid:
+            flash(result, category='error')
+            return redirect(url_for('views.view_class', class_id=assignment.class_id))
+        student_answer = result
         
         # Create new submission
         new_submission = Submission(
@@ -362,14 +433,28 @@ def add_submission(assignment_id):
 def create_assignment(class_id):
     cls = Class.query.get_or_404(class_id)
     
+    # Security: Check if user owns this class
+    if not check_resource_access(cls):
+        flash('You do not have permission to create assignments for this class!', category='error')
+        return redirect(url_for('views.dashboard'))
+    
     if request.method == 'POST':
         name = request.form.get('name')
         question = request.form.get('question')
         rubric_id = request.form.get('rubric_id')
         
-        if not name or not question:
-            flash('Assignment name and question are required!', category='error')
+        # Input validation
+        valid, result = validate_text_field(name, 'Assignment name', max_length=150)
+        if not valid:
+            flash(result, category='error')
             return redirect(url_for('views.create_assignment', class_id=class_id))
+        name = result
+        
+        valid, result = validate_text_field(question, 'Question')
+        if not valid:
+            flash(result, category='error')
+            return redirect(url_for('views.create_assignment', class_id=class_id))
+        question = result
         
         # Create new assignment
         new_assignment = Assignment(
@@ -1496,10 +1581,11 @@ def oauth2callback():
 
 def get_google_credentials():
     """
-    Helper function to get refreshed Google credentials
+    Helper function to get refreshed Google credentials.
+    Returns None if credentials are not available or refresh fails.
     """
     if not current_user.google_tokens:
-        print("No Google tokens found for user")
+        logger.warning("No Google tokens found for user")
         return None
     
     try:
@@ -1510,8 +1596,7 @@ def get_google_credentials():
         missing_fields = [field for field in required_fields if field not in token_data or not token_data[field]]
         
         if missing_fields:
-            print(f"Missing required fields for token refresh: {', '.join(missing_fields)}")
-            print(f"Available token data keys: {list(token_data.keys())}")
+            logger.warning(f"Missing required fields for token refresh: {', '.join(missing_fields)}")
             # Re-authentication needed
             return None
         
@@ -1526,9 +1611,10 @@ def get_google_credentials():
         
         # Force refresh if token is expired
         if not credentials.valid:
-            print("Token expired, attempting to refresh")
-            request = google.auth.transport.requests.Request()
-            credentials.refresh(request)
+            logger.info("Token expired, attempting to refresh")
+            import google.auth.transport.requests
+            auth_request = google.auth.transport.requests.Request()
+            credentials.refresh(auth_request)
             
             # Update stored token
             current_user.google_tokens = json.dumps({
@@ -1540,69 +1626,13 @@ def get_google_credentials():
                 'scopes': credentials.scopes
             })
             db.session.commit()
-            print("Token refreshed successfully")
+            logger.info("Token refreshed successfully")
         
         return credentials
     except Exception as e:
-        print(f"Error refreshing credentials: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error refreshing credentials: {str(e)}")
         return None
 
-def get_google_credentials():
-    """
-    Helper function to get refreshed Google credentials
-    """
-    if not current_user.google_tokens:
-        print("No Google tokens found for user")
-        return None
-    
-    try:
-        token_data = json.loads(current_user.google_tokens)
-        
-        # Check if we have all required fields for refreshing
-        required_fields = ['refresh_token', 'token_uri', 'client_id', 'client_secret']
-        missing_fields = [field for field in required_fields if field not in token_data or not token_data[field]]
-        
-        if missing_fields:
-            print(f"Missing required fields for token refresh: {', '.join(missing_fields)}")
-            print(f"Available token data keys: {list(token_data.keys())}")
-            # Re-authentication needed
-            return None
-        
-        credentials = google.oauth2.credentials.Credentials(
-            token=token_data.get('token'),
-            refresh_token=token_data.get('refresh_token'),
-            token_uri=token_data.get('token_uri'),
-            client_id=token_data.get('client_id'),
-            client_secret=token_data.get('client_secret'),
-            scopes=token_data.get('scopes')
-        )
-        
-        # Force refresh if token is expired
-        if not credentials.valid:
-            print("Token expired, attempting to refresh")
-            request = google.auth.transport.requests.Request()
-            credentials.refresh(request)
-            
-            # Update stored token
-            current_user.google_tokens = json.dumps({
-                'token': credentials.token,
-                'refresh_token': credentials.refresh_token,
-                'token_uri': credentials.token_uri,
-                'client_id': credentials.client_id,
-                'client_secret': credentials.client_secret,
-                'scopes': credentials.scopes
-            })
-            db.session.commit()
-            print("Token refreshed successfully")
-        
-        return credentials
-    except Exception as e:
-        print(f"Error refreshing credentials: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
 
 @views.route('/select-google-class', endpoint='select_google_class', methods=['GET', 'POST'])
 @login_required
@@ -2250,18 +2280,35 @@ def check_submission_data_column():
 
 
 @views.route('/update-student-email/<submission_id>', methods=['POST'])
+@login_required
 def update_student_email(submission_id):
+    """Update a student's email for a submission."""
     try:
+        submission = Submission.query.get_or_404(submission_id)
+        
+        # Security: Check if user owns the class this submission belongs to
+        if not check_resource_access(submission.assignment_ref.class_ref):
+            return jsonify({'error': 'Permission denied'}), 403
+        
         data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
         email = data.get('email')
         
+        # Validate email
+        valid, result = validate_email(email)
+        if not valid:
+            return jsonify({'error': result}), 400
+        
         # Update the submission with the new email
-        submission = Submission.query.get(submission_id)
-        submission.student_email = email
+        submission.student_email = result
         db.session.commit()
         
+        logger.info(f"User {current_user.id} updated email for submission {submission_id}")
         return jsonify({'success': True, 'message': 'Email updated successfully'})
     except Exception as e:
+        logger.error(f"Error updating student email: {str(e)}")
         return jsonify({'error': str(e)}), 400
     
 @views.route('/get-extracted-text/<int:submission_id>/<file_id>', endpoint='get_extracted_text')
